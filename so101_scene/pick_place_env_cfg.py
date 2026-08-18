@@ -225,6 +225,17 @@ class SO101CubePickPlaceEnvCfg(LiftEnvCfg):
 
         self.rewards.joint_vel.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=SO101_ARM_JOINTS)
 
+        # contrib.lift ramps both smoothness penalties to -1e-1 at 10k env-steps (~iter 312
+        # at 32 steps/iter). On the Franka that is a mild regulariser. On the SO-101 it is
+        # not: measured, the joint_vel term went to -4.07 against a task reward of +3.19, so
+        # mean reward inverted +13.1 -> -4.8 and policy std began collapsing 0.86 -> 0.51 --
+        # the agent was being paid more to hold still than to lift the cube.
+        #
+        # joint_vel drops 10x to -1e-2 (~-0.4, a real penalty that does not outrank the
+        # task). action_rate stays at -1e-1: measured at only -0.29, it is already
+        # proportionate.
+        self.curriculum.joint_vel.params["weight"] = -1e-2
+
         # Drop detection: table top is z=0 in this scene, so -0.05 means it fell off.
         self.terminations.object_dropping.params["minimum_height"] = -0.05
 
