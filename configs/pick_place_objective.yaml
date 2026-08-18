@@ -1,0 +1,75 @@
+# Pick-and-place with the objective stated in the config.
+#
+#   python scripts/run.py --config configs/pick_place_objective.yaml --describe
+#   python scripts/run.py --config configs/pick_place_objective.yaml
+#
+# =====================================================================================
+#  WHERE THE SO-ARM101 CAN ACTUALLY WORK
+#  Measured by scripts/measure_workspace.py: 1500 random joint configurations, reading
+#  where the gripper really ends up. Base at the origin, +x is forward.
+#
+#    radial distance from base : 0.02 .. 0.35 m      (absolute max 0.370 m)
+#    height above table        : 0.00 .. 0.45 m      (absolute max 0.460 m)
+#
+#  For a TOP-DOWN grasp the gripper must point down, which holds for only 28% of
+#  configurations and shrinks the usable radius to about 0.33 m.
+#
+#  Practical areas for this task:
+#    spawn the cube on the table   x 0.15..0.26   y -0.10..0.10   z = half the cube
+#    place target in the air       x 0.14..0.26   y -0.10..0.10   z 0.05..0.20
+#
+#  Anything mostly outside the envelope is REJECTED at parse time, before Isaac Sim
+#  starts. A goal the arm cannot reach trains to a flat reward and looks like a broken
+#  policy, so it is cheaper to fail in milliseconds.
+# =====================================================================================
+
+meta:
+  name: so101-pick-place-objective
+  notes: Objective stated as a pattern, parsed deterministically. No LLM involved.
+
+task: pick_place
+
+objective:
+  # Objects that pick[...] may choose from. Names must exist in scene.objects.
+  pickable: [object]
+
+  # Where the object is reset to at the start of each episode (absolute coordinates).
+  # box(x, y, z, dx, dy, dz) -- centre and half-extents. dz = 0 keeps it on the table.
+  spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
+
+  # What to achieve.
+  #   pick[<name>]                 a specific object
+  #   pick[random]                 uniform over `pickable`
+  #   pick[random(a, b)]           uniform over a named subset
+  #   place[x, y, z]               a fixed target
+  #   place[random(x, y, z, r<R>)] uniform in a disc of radius R at height z
+  #   place[box(x, y, z, dx, dy, dz)]
+  #
+  # Examples that parse:
+  #   "pick[object] place[0.20, 0.0, 0.12]"
+  #   "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+  #   "pick:[object]place:[0.20,0.0,0.12]"
+  # Example that is REJECTED (12% reachable -- a 1 m radius on a 0.35 m arm):
+  #   "pick[random] place[random(0, 0, 0, r1)]"
+  sequence: "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+
+scene:
+  num_envs: 64
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]   # (x,y,z,w) in Isaac Lab 3.0
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+
+sim:
+  episode_length_s: 5.0
+
+control:
+  source: zero
+  action_horizon: 1

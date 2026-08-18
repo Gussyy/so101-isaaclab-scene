@@ -21,7 +21,7 @@ import yaml
 from simbridge import scene  # noqa: F401  (registers builtins)
 from simbridge.registry import CAMERAS, OBJECTS, ROBOTS, TASKS, lookup
 
-_TOP_LEVEL = {"task", "scene", "sim", "control", "render", "meta"}
+_TOP_LEVEL = {"task", "scene", "sim", "control", "render", "objective", "meta"}
 _SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras"}
 _SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device"}
 
@@ -35,6 +35,7 @@ _RENDER_KEYS = {
     "shadows", "ambient_occlusion", "samples_per_pixel", "max_bounces",
     "carb_settings",
 }
+_OBJECTIVE_KEYS = {"pickable", "sequence", "spawn"}
 _AA_MODES = {"Off", "FXAA", "DLSS", "TAA", "DLAA"}
 _DLSS_MODES = {0: "performance", 1: "balanced", 2: "quality", 3: "auto"}
 
@@ -58,6 +59,21 @@ def load_config(path: str | Path) -> dict[str, Any]:
     _reject_unknown(cfg.get("scene") or {}, _SCENE_KEYS, "scene")
     _reject_unknown(cfg.get("sim") or {}, _SIM_KEYS, "sim")
     _reject_unknown(cfg.get("render") or {}, _RENDER_KEYS, "render")
+    _reject_unknown(cfg.get("objective") or {}, _OBJECTIVE_KEYS, "objective")
+
+    # Parse the objective here so a bad or unreachable goal fails in milliseconds,
+    # rather than after Isaac Sim has spent two minutes starting up.
+    obj_spec = cfg.get("objective") or {}
+    if obj_spec.get("sequence"):
+        from simbridge.objective import parse_objective, parse_region
+
+        parsed = parse_objective(obj_spec["sequence"], obj_spec.get("pickable") or [])
+        for w in parsed.warnings:
+            print(f"[config] warning: {w}")
+        if obj_spec.get("spawn"):
+            spawn = parse_region(obj_spec["spawn"], label="objective.spawn")
+            for w in spawn[1]:
+                print(f"[config] warning: {w}")
 
     render = cfg.get("render") or {}
     # YAML 1.1 parses bare Off/On/Yes/No as booleans, so `antialiasing: Off` arrives as False.
@@ -194,6 +210,14 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
         )
     apply_render_cfg(env_cfg, render_spec, cam_names)
 
+    obj_spec = cfg.get("objective") or {}
+    if obj_spec.get("sequence"):
+        from simbridge.objective import apply_objective, parse_objective, parse_region
+
+        parsed = parse_objective(obj_spec["sequence"], obj_spec.get("pickable") or [])
+        spawn = parse_region(obj_spec["spawn"], label="objective.spawn")[0] if obj_spec.get("spawn") else None
+        apply_objective(env_cfg, parsed, spawn=spawn)
+
     return env_cfg
 
 
@@ -201,6 +225,7 @@ def describe(cfg: dict[str, Any]) -> str:
     """One-screen summary, for confirming a config says what you meant before a long run."""
     s, sim, ctl = cfg.get("scene") or {}, cfg.get("sim") or {}, cfg.get("control") or {}
     rnd = cfg.get("render") or {}
+    obj = cfg.get("objective") or {}
     lines = [
         f"task      : {cfg['task']}  -> {TASKS.get(cfg['task'] if isinstance(cfg['task'], str) else '', '?')}",
         f"envs      : {s.get('num_envs', 64)}  spacing={s.get('env_spacing', '-')}",
@@ -211,6 +236,8 @@ def describe(cfg: dict[str, Any]) -> str:
         f"episode_s={sim.get('episode_length_s','-')}",
         f"control   : source={ctl.get('source','-')} transport={ctl.get('transport','inprocess')} "
         f"horizon={ctl.get('action_horizon',1)}",
+        f"objective : {obj.get('sequence','-')}",
+        f"spawn     : {obj.get('spawn','-')}",
         f"render    : aa={rnd.get('antialiasing','default')} "
         f"dlss_mode={rnd.get('dlss_mode','-')} framegen={rnd.get('frame_generation','-')}",
     ]

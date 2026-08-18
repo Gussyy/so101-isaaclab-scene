@@ -1,0 +1,13 @@
+  absolute max reach : 0.370 m   max height : 0.460 m
+  any gripper orientation (1st-99th percentile):
+    radial  0.017 .. 0.355 m
+    height  -0.050 .. 0.451 m
+  top-down grasp only (gripper axis within 0.70 of -Z, 28% of samples):
+    radial  0.016 .. 0.333 m
+    height  0.142 .. 0.457 m
+    jaw joint range   : -0.175 .. +1.745 rad
+    jaw body separation at closed / open : 36.2 / 36.2 mm
+    WARNING: no measurable jaw travel -- the joint did not move; treat as unmeasured
+    -> stall-torque payload bound 3439 g -- an UPPER bound, and a
+       badly optimistic one: it ignores the arm's own weight, gearing losses and
+       all dynamics. The real SO-101 is quoted nearer 200-300 g.

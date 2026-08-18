@@ -89,6 +89,42 @@ def _widget(spec):
     return RigidObjectCfg(...)
 ```
 
+## Task objectives
+
+State the goal in the config, as a pattern:
+
+```yaml
+objective:
+  pickable: [object]
+  spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
+  sequence: "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+```
+
+| form | meaning |
+|---|---|
+| `pick[object]` | that object |
+| `pick[random]` | uniform over `pickable` |
+| `pick[random(a, b)]` | uniform over a subset |
+| `place[x, y, z]` | fixed point |
+| `place[random(x, y, z, r0.06)]` | disc of that radius |
+| `place[box(x, y, z, dx, dy, dz)]` | box, centre and half-extents |
+
+Parsed by a fixed grammar — no model generates or interprets it, so a config always produces the
+same task.
+
+Regions are checked against the arm's measured envelope before Isaac Sim starts. Under 20%
+reachable is rejected; 20–90% warns with the percentage. `place[random(0,0,0,r1)]` is a 1 m
+radius on an arm that reaches 0.35 m, and fails with `only 12% reachable`.
+
+Measured working area (`scripts/measure_workspace.py`, 1500 sampled configurations):
+
+```
+radial from base   0.02 .. 0.35 m      (0.33 m for a top-down grasp)
+height above table 0.00 .. 0.45 m
+```
+
+Full reference: [docs/OBJECTIVES.md](docs/OBJECTIVES.md).
+
 ## Keyboard teleop
 
 Two ways, depending on where you want focus.
@@ -228,6 +264,7 @@ Two gotchas:
 | `diagnose_scene.py` | print world positions of base, EE, object, goal |
 | `measure_ee.py` | measure the grasp point between the jaws |
 | `dump_camera_views.py` | save one frame per camera + pixel stats |
+| `measure_workspace.py` | measure the arm's reachable envelope and graspability |
 | `run.py` | run a YAML scene with any driver |
 | `policy_server.py` | serve actions over ZeroMQ |
 | `teleop_server.py` | keyboard teleop over ZeroMQ, no simulator needed |
