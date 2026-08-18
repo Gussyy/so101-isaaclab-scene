@@ -110,7 +110,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | kind | names |
 |---|---|
 | robots | `so101` |
-| objects | `cuboid`, `static_cuboid`, `usd` |
+| objects | `cuboid`, `ycb`, `static_cuboid`, `usd` |
 | cameras | `tiled` |
 | sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `zmq` |
 
@@ -132,7 +132,7 @@ State the goal in the config, as a pattern:
 objective:
   pickable: [object]
   spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
-  sequence: "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+  sequence: "pick[random] place[random(0.0, 0.20, 0.12, r0.06)]"
 ```
 
 | form | meaning |
@@ -158,7 +158,48 @@ radial from base   0.02 .. 0.35 m      (0.33 m for a top-down grasp)
 height above table 0.00 .. 0.45 m
 ```
 
+Coordinates are in the environment frame — the same frame as `scene.robot.pos` and a camera's
+`look_at`. `place` is converted into the robot root frame for you.
+
 Full reference: [docs/OBJECTIVES.md](docs/OBJECTIVES.md).
+
+## Objects
+
+Beyond a coloured `cuboid`, a config can name a prop from Isaac Sim's YCB set:
+
+```yaml
+scene:
+  objects:
+    object:
+      type: ycb
+      name: gelatin_box
+```
+
+![five props spawned in the scene, boxed by whether the jaw can close on them](docs/objects.png)
+
+**Most of that set is too big for this arm.** The SO-101 has one moving jaw, about 36 mm across,
+and the shortest side of an object is what has to fit between the jaws. Of the 21 props Isaac Sim
+ships — and there is no apple and no orange among them — three are comfortably pickable and one
+is marginal:
+
+| prop | shortest side |
+|---|---|
+| `scissors` | 17 mm |
+| `large_marker` | 19 mm |
+| `gelatin_box` | 30 mm |
+| `tuna_fish_can` | 34 mm — marginal |
+
+Naming a wider one warns at parse time rather than failing an hour into training:
+
+```
+[config] warning: pick[object] is 81 mm across its shortest side, jaw is 36.2 mm;
+                  the arm cannot close on it (see docs/OBJECTS.md)
+```
+
+The widths are measured, not copied from the YCB spec sheet — `python scripts/measure_objects.py`
+opens each asset and reports any drift from the table the checker uses.
+
+Full reference: [docs/OBJECTS.md](docs/OBJECTS.md) · raw table: [docs/objects.txt](docs/objects.txt).
 
 ## LeRobot
 
@@ -308,11 +349,21 @@ body_names  : base, shoulder, upper_arm, lower_arm, wrist, gripper, moving_jaw_s
 
 End-effector body is `gripper`. There is also a joint named `gripper`.
 
-Two gotchas:
+These limits are read from the spawned articulation, not chosen here — Isaac Sim's
+`so101_new_calib.usd` carries them and they match TheRobotStudio's URDF. Isaac Lab applies them
+unmodified (`soft_joint_pos_limit_factor = 1.0`).
+
+Three gotchas:
 
 - 5 DOF can't hit an arbitrary 6-DOF pose. Soft-weight orientation in task-space controllers.
 - `SO101_CFG`'s default joint pose points the arm away from the workspace. The configs here seat
   it in a crouch with a 90° base yaw.
+- **The action scale is mistuned.** `JointPositionActionCfg(scale=0.5, use_default_offset=True)`
+  gives ±0.5 rad per unit action around the crouch pose. Actions are not clipped, so the trained
+  policy compensates by emitting −11 to +5 — it saturates the parameterisation rather than being
+  limited by it. Nothing clamps the arm short of its real range (`wrist_roll` reaches −2.744,
+  exactly its limit), but a larger `scale` would be better conditioned. Changing it invalidates
+  the current checkpoint. Measurements: [docs/joint_range.txt](docs/joint_range.txt).
 
 ## Tasks
 
@@ -329,10 +380,12 @@ Two gotchas:
 | script | use |
 |---|---|
 | `scene_demo.py` | load the robot, print joint/body names and limits |
-| `diagnose_scene.py` | print world positions of base, EE, object, goal |
+| `diagnose_scene.py` | print real positions of base, EE, object and goal, in both frames |
 | `measure_ee.py` | measure the grasp point between the jaws |
 | `dump_camera_views.py` | save one frame per camera + pixel stats |
-| `measure_workspace.py` | measure the arm's reachable envelope and graspability |
+| `measure_workspace.py` | measure the arm's reachable envelope and jaw opening |
+| `measure_objects.py` | measure every named prop and say which the jaw can close on |
+| `capture_clip.py` | render one config to a video clip, for documentation |
 | `collect_dataset.py` | record a LeRobot dataset from any driver |
 | `lerobot_server.py` | LeRobot teleop or policy, over ZeroMQ |
 | `run_all_tests.py` | the whole test suite |
@@ -358,5 +411,7 @@ Self-checks:
 ```bash
 python -m simbridge.schema
 python -m simbridge.interfaces
+python -m simbridge.objective
+python simbridge/scene/builtins.py
 python -m simbridge.transport.test_roundtrip
 ```

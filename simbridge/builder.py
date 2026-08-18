@@ -46,6 +46,43 @@ def _reject_unknown(d: dict[str, Any], allowed: set[str], where: str) -> None:
         raise ValueError(f"unknown key(s) {sorted(extra)} in '{where}'; allowed: {sorted(allowed)}")
 
 
+def check_pickable(cfg: dict[str, Any], names: list[str]) -> list[str]:
+    """Warn about objects the SO-101's single jaw cannot close on.
+
+    Same reasoning as the reach check: a config that names ``pick[mug]`` is not malformed, it is
+    impossible, and the way that failure shows up is a flat reward curve after an hour of
+    training. The width is known without starting Isaac Sim -- a ``cuboid`` states its size, and
+    a ``ycb`` prop has a measured one in the catalogue -- so it costs nothing to say so here.
+
+    Warns rather than raises. The jaw figure is soft (see :data:`JAW_WIDTH`), and a task may
+    legitimately want an object it pushes rather than lifts.
+    """
+    from simbridge.objective import PROP_CATALOGUE, graspable
+
+    objects = (cfg.get("scene") or {}).get("objects") or {}
+    out = []
+    for name in names:
+        spec = objects.get(name)
+        if not isinstance(spec, dict):
+            continue          # not declared here; the task's own object, whose size we know works
+        kind = spec.get("type")
+        if kind == "ycb":
+            entry = PROP_CATALOGUE.get(spec.get("name", ""))
+            width = entry[1] * float(spec.get("scale", 1.0)) if entry else None
+        elif kind == "cuboid":
+            width = min(float(c) for c in spec.get("size", (0.025, 0.025, 0.025)))
+        else:
+            width = None      # a bare `usd` asset: nothing here knows how big it is
+        if width is None:
+            continue
+        ok, why = graspable(width)
+        if not ok:
+            out.append(f"pick[{name}] is {why}; the arm cannot close on it (see docs/OBJECTS.md)")
+        elif "tight" in why:
+            out.append(f"pick[{name}] is {why}")
+    return out
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     """Read and structurally validate a scene/task YAML."""
     path = Path(path)
@@ -74,6 +111,9 @@ def load_config(path: str | Path) -> dict[str, Any]:
             spawn = parse_region(obj_spec["spawn"], label="objective.spawn")
             for w in spawn[1]:
                 print(f"[config] warning: {w}")
+
+        for w in check_pickable(cfg, parsed.pick_names):
+            print(f"[config] warning: {w}")
 
     render = cfg.get("render") or {}
     # YAML 1.1 parses bare Off/On/Yes/No as booleans, so `antialiasing: Off` arrives as False.

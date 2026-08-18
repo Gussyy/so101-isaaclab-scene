@@ -1,0 +1,42 @@
+Named props, measured by opening each asset (scripts/measure_objects.py).
+
+SO-101 jaw opening: 36.2 mm.  The shortest side has to fit between the jaws.
+Reference: the task's own cube is 25 mm and 15 g, and is picked at 92% success.
+
+CAVEAT on that 36.2 mm. measure_workspace.py reported it as the separation between the
+two jaw *body origins*, and reported no measurable travel between the closed and open
+extremes -- the revolute jaw sweeps its tips while the body origins stay put. So it is a
+reasonable scale for the gripper, not a measured maximum opening. Treat the boundary as
+soft: 'tight' may well work, and something a few mm over may too. What the column does
+rule out confidently is the 100 mm end of the table.
+
+Mass is blank because these assets do not author UsdPhysics mass; PhysX derives it from
+density at spawn. The width column is the one doing the work here.
+
+prop                  shortest   longest     mass   pickable
+------------------------------------------------------------------------------
+scissors                17.2mm   197.2mm        -   yes    17 mm
+large_marker            18.8mm   120.9mm        -   yes    19 mm
+gelatin_box             30.0mm    89.2mm        -   yes    30 mm
+tuna_fish_can           33.5mm    85.6mm        -   tight  34 mm, within 15% of the 36.2 mm jaw -- tight
+large_clamp             36.4mm   164.9mm        -   no     36 mm across its shortest side, jaw is 36.2 mm
+extra_large_clamp       36.5mm   202.6mm        -   no     36 mm across its shortest side, jaw is 36.2 mm
+pudding_box             38.5mm   113.7mm        -   no     38 mm across its shortest side, jaw is 36.2 mm
+banana                  38.6mm   197.2mm        -   no     39 mm across its shortest side, jaw is 36.2 mm
+sugar_box               45.1mm   176.3mm        -   no     45 mm across its shortest side, jaw is 36.2 mm
+foam_brick              51.2mm    77.9mm        -   no     51 mm across its shortest side, jaw is 36.2 mm
+bowl                    55.0mm   161.5mm        -   no     55 mm across its shortest side, jaw is 36.2 mm
+power_drill             57.2mm   186.8mm        -   no     57 mm across its shortest side, jaw is 36.2 mm
+potted_meat_can         57.6mm   101.6mm        -   no     58 mm across its shortest side, jaw is 36.2 mm
+mustard_bottle          58.2mm   191.3mm        -   no     58 mm across its shortest side, jaw is 36.2 mm
+tomato_soup_can         67.7mm   101.9mm        -   no     68 mm across its shortest side, jaw is 36.2 mm
+bleach_cleanser         67.7mm   250.6mm        -   no     68 mm across its shortest side, jaw is 36.2 mm
+cracker_box             71.8mm   213.4mm        -   no     72 mm across its shortest side, jaw is 36.2 mm
+mug                     81.3mm   117.0mm        -   no     81 mm across its shortest side, jaw is 36.2 mm
+wood_block              89.7mm   206.1mm        -   no     90 mm across its shortest side, jaw is 36.2 mm
+master_chef_can        102.3mm   140.2mm        -   no     102 mm across its shortest side, jaw is 36.2 mm
+pitcher_base           133.1mm   242.4mm        -   no     133 mm across its shortest side, jaw is 36.2 mm
+------------------------------------------------------------------------------
+no: 17  tight: 1  yes: 3
+
+matches simbridge.objective.PROP_CATALOGUE (21 props)

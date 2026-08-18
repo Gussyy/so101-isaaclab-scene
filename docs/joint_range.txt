@@ -1,0 +1,44 @@
+SO-ARM101 joint limits and the range actually used
+==================================================
+
+The limits are NOT set by this repo. They are read from the spawned articulation, which takes
+them from Isaac Sim's so101_new_calib.usd, and they match TheRobotStudio's SO-ARM101 URDF.
+Isaac Lab enforces them unmodified: soft_joint_pos_limit_factor = 1.0, so the soft limits are
+identical to the hard ones.
+
+  joint            lo        hi     span
+  shoulder_pan   -1.920    1.920    220 deg
+  shoulder_lift  -1.745    1.745    200 deg
+  elbow_flex     -1.690    1.690    194 deg
+  wrist_flex     -1.658    1.658    190 deg
+  wrist_roll     -2.744    2.841    320 deg
+  gripper        -0.175    1.745    110 deg
+
+What the trained pick-and-place policy actually uses, measured over 400 steps x 64 envs:
+
+joint             act min  act max |    q min   q max |      lo     hi | used
+shoulder_pan        -3.86     3.93 |   -1.733   0.299 |  -1.920  1.920 |   53%
+shoulder_lift       -2.58     4.74 |   -1.203  -0.052 |  -1.745  1.745 |   33%
+elbow_flex          -4.45     4.05 |    0.412   1.476 |  -1.690  1.690 |   31%
+wrist_flex          -6.59     0.68 |   -0.024   0.674 |  -1.658  1.658 |   21%
+wrist_roll          -8.82     4.11 |   -2.744   0.400 |  -2.744  2.841 |   56%
+gripper            -10.95     3.00 |   -0.001   0.202 |  -0.175  1.745 |   11%
+Reading this
+------------
+* wrist_roll reaches -2.744, exactly its lower limit, so nothing is clamping the arm short of
+  the asset's own range.
+* Actions are NOT clipped (JointPositionActionCfg clip=None). The policy emits -11 to +5 against
+  a scale of 0.5, which means it is saturating the parameterisation rather than being limited by
+  it. `scale=0.5` with `use_default_offset=True` centres commands on the crouch pose and gives
+  +/-0.5 rad per unit action; the policy compensates by shouting. Raising the scale would put it
+  in a better-conditioned range -- and would invalidate this checkpoint, which learned against
+  the current one.
+* The narrow columns are the task, not the arm. A 5-second episode, one cube 20 cm in front and
+  a goal 20 cm to the side does not need 200 degrees of shoulder travel.
+* gripper spans 11%: commanded 0.0 (close) / 1.2 (open) by BinaryJointPositionAction, but the
+  measured joint never passes 0.202 rad. Worth a look -- it is consistent with the "no measurable
+  jaw travel" result in workspace.txt, and it means the jaw pinches nearly closed rather than
+  opening and enclosing.
+
+Reproduce: the table above comes from stepping configs/variants/goal_centre.yaml under the
+trained checkpoint and recording per-joint min/max of joint_pos against joint_pos_limits.

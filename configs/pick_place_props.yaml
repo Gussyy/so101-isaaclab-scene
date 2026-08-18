@@ -1,0 +1,74 @@
+# Pick-and-place with named props from Isaac Sim's YCB set instead of a coloured cube.
+#
+#   python scripts/run.py --config configs/pick_place_props.yaml --describe
+#   python scripts/run.py --config configs/pick_place_props.yaml
+#
+# =====================================================================================
+#  WHICH PROPS THIS ARM CAN ACTUALLY PICK UP
+#  Measured by scripts/measure_objects.py, which opens each asset and reads its bounding
+#  box. Full table in docs/objects.txt; the reasoning is in docs/OBJECTS.md.
+#
+#  The SO-101 has ONE moving jaw, about 36 mm across. The shortest side of the object is
+#  what has to fit between the jaws, so most of the YCB set is simply too big.
+#
+#    pickable          scissors (17mm)  large_marker (19mm)  gelatin_box (30mm)
+#    marginal          tuna_fish_can (34mm)
+#    too wide          banana, sugar_box, mug, bowl, tomato_soup_can, and 12 more
+#
+#  There is no apple and no orange in Isaac Sim's YCB set.
+#
+#  Naming a prop that is too wide is a warning, not an error -- the jaw figure is soft and
+#  a task may want something it pushes rather than lifts. But a policy will not learn to
+#  lift what the gripper cannot hold, and that failure looks like a broken policy.
+#
+#  Assets stream from the Isaac asset server, so the first run of this config is slow.
+# =====================================================================================
+
+meta:
+  name: so101-pick-place-props
+  notes: Named YCB props, filtered to the ones the jaw can close on.
+
+task: pick_place
+
+objective:
+  # Every name here is declared under scene.objects below.
+  pickable: [object]
+  spawn: "box(0.20, 0.0, 0.02, 0.03, 0.06, 0.0)"
+  # Swap `object`'s type/name below and this line does not change.
+  sequence: "pick[object] place[0.0, 0.20, 0.12]"
+
+scene:
+  num_envs: 16
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+  objects:
+    # `object` is the name the pick_place task expects. Try gelatin_box, large_marker,
+    # scissors or tuna_fish_can; anything else in the catalogue will warn.
+    object:
+      type: ycb
+      name: gelatin_box
+      pos: [0.20, 0.0, 0.02]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.60, 0.55, 0.42]
+      look_at: [0.10, 0.10, 0.08]
+      focal_length: 22.0
+
+sim:
+  episode_length_s: 5.0
+
+control:
+  source: zero
+  action_horizon: 1

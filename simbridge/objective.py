@@ -47,6 +47,56 @@ REACH_HEIGHT = (0.0, 0.45)    # m
 # position, not a grasp -- but a pick location outside it is unlikely to be graspable from above.
 TOPDOWN_RADIAL_MAX = 0.33     # m
 
+# What the single jaw can close on. measure_workspace.py put the two jaw *body origins* 36.2 mm
+# apart and found no measurable travel between the closed and open extremes -- the revolute jaw
+# sweeps its tips while the origins stay put. So this is the gripper's scale, not a measured
+# maximum opening, and the boundary is soft by a few millimetres either way. It is still the
+# right order of magnitude, and it is what rules out the 100 mm end of the prop list.
+JAW_WIDTH = 0.0362            # m
+
+# Named props from Isaac Sim's YCB set: config name -> (asset stem, shortest bounding-box side).
+# The widths are MEASURED, by opening each asset: `python scripts/measure_objects.py`, which also
+# reports any drift from this table. The shortest side is what has to fit between the jaws.
+#
+# There is no apple and no orange in Isaac Sim's YCB set. Of the 21 props that are there, three
+# are comfortably pickable by this arm and one is marginal; the rest are wider than the gripper.
+PROP_CATALOGUE: dict[str, tuple[str, float]] = {
+    "scissors": ("037_scissors", 0.0172),
+    "large_marker": ("040_large_marker", 0.0188),
+    "gelatin_box": ("009_gelatin_box", 0.0300),
+    "tuna_fish_can": ("007_tuna_fish_can", 0.0335),
+    "large_clamp": ("051_large_clamp", 0.0364),
+    "extra_large_clamp": ("052_extra_large_clamp", 0.0365),
+    "pudding_box": ("008_pudding_box", 0.0385),
+    "banana": ("011_banana", 0.0386),
+    "sugar_box": ("004_sugar_box", 0.0451),
+    "foam_brick": ("061_foam_brick", 0.0512),
+    "bowl": ("024_bowl", 0.0550),
+    "power_drill": ("035_power_drill", 0.0572),
+    "potted_meat_can": ("010_potted_meat_can", 0.0576),
+    "mustard_bottle": ("006_mustard_bottle", 0.0582),
+    "tomato_soup_can": ("005_tomato_soup_can", 0.0677),
+    "bleach_cleanser": ("021_bleach_cleanser", 0.0677),
+    "cracker_box": ("003_cracker_box", 0.0718),
+    "mug": ("025_mug", 0.0813),
+    "wood_block": ("036_wood_block", 0.0897),
+    "master_chef_can": ("002_master_chef_can", 0.1023),
+    "pitcher_base": ("019_pitcher_base", 0.1331),
+}
+
+
+def graspable(width: float, jaw: float = JAW_WIDTH) -> tuple[bool, str]:
+    """Whether the jaw can close on something this wide, and why.
+
+    Returns ``(ok, reason)``. ``ok`` is False only for a clear miss; a width within 15% of the
+    jaw comes back True with a reason saying it is tight, because the jaw figure is itself soft.
+    """
+    if width > jaw:
+        return False, f"{width * 1000:.0f} mm across its shortest side, jaw is {jaw * 1000:.1f} mm"
+    if width > jaw * 0.85:
+        return True, f"{width * 1000:.0f} mm, within 15% of the {jaw * 1000:.1f} mm jaw -- tight"
+    return True, f"{width * 1000:.0f} mm"
+
 
 class ObjectiveError(ValueError):
     """Raised for a malformed or unreachable objective."""
@@ -400,6 +450,17 @@ def demo() -> None:
     """Self-check: the grammar, and the reach guard that is the point of it."""
     pickable = ["cube_red", "cube_blue"]
 
+    # Grasp width: the jaw is the other hard limit besides reach.
+    assert graspable(0.025)[0], "the task's own 25 mm cube must pass"
+    ok, why = graspable(PROP_CATALOGUE["mug"][1])
+    assert not ok and "81 mm" in why, why
+    ok, why = graspable(PROP_CATALOGUE["gelatin_box"][1])
+    assert ok and "tight" not in why, why
+    ok, why = graspable(PROP_CATALOGUE["tuna_fish_can"][1])
+    assert ok and "tight" in why, why          # marginal, and says so rather than silently passing
+    assert all(w > 0 for _, w in PROP_CATALOGUE.values())
+    assert len({stem for stem, _ in PROP_CATALOGUE.values()}) == len(PROP_CATALOGUE)
+
     # Frame conversion: place is written env-frame, commands want the root frame.
     q90 = (0.0, 0.0, 0.70710678, 0.70710678)          # 90 deg about z, what every config uses
     r, w = to_root_frame(Point(0.0, 0.20, 0.10), q90)
@@ -460,7 +521,7 @@ def demo() -> None:
     clean = parse_objective("pick[random] place[random(0.20, 0.0, 0.12, r0.06)]", pickable)
     assert not clean.warnings, clean.warnings
 
-    print("objective demo OK: grammar, colon form, subsets, boxes, reach rejection and warnings")
+    print("objective demo OK: grasp widths, grammar, colon form, subsets, boxes, reach rejection and warnings")
     print(f"  example -> {o.describe()}")
     print(f"  warning -> {o.warnings[0][:96]}...")
 
