@@ -77,7 +77,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | robots | `so101` |
 | objects | `cuboid`, `static_cuboid`, `usd` |
 | cameras | `tiled` |
-| sources | `zero`, `random`, `rl_checkpoint`, `zmq` |
+| sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `zmq` |
 
 Add your own:
 
@@ -230,6 +230,7 @@ Two gotchas:
 | `dump_camera_views.py` | save one frame per camera + pixel stats |
 | `run.py` | run a YAML scene with any driver |
 | `policy_server.py` | serve actions over ZeroMQ |
+| `teleop_server.py` | keyboard teleop over ZeroMQ, no simulator needed |
 
 Most bugs in this repo came from guessing geometry — a grasp offset off by a cube width, an arm
 facing away from its workspace. These print the real numbers.
