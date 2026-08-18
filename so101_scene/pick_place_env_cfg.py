@@ -258,3 +258,59 @@ class SO101CubePickPlaceEnvCfg_PLAY(SO101CubePickPlaceEnvCfg):
         self.scene.num_envs = 16
         self.scene.env_spacing = 1.0
         self.observations.policy.enable_corruption = False
+
+
+@configclass
+class SO101CubePickPlaceBlindEnvCfg(SO101CubePickPlaceEnvCfg):
+    """The pick-and-place task with the cube's position removed from the observation.
+
+    This is the blind baseline, and it is a kill check rather than a task worth training.
+
+    The full observation hands the policy ``object_position_in_robot_root_frame`` -- the exact
+    ground-truth quantity a camera would have to infer. A visuomotor policy given that vector is
+    a state policy with a decorative encoder. So before building any of it, the question is
+    whether the *rest* of the observation already suffices: the cube spawns in a patch only
+    0.06 x 0.12 m wide, and a policy that always reaches for the middle of that patch may score
+    respectably without ever knowing where the cube actually is.
+
+    Interpretation (design doc kill criterion K1):
+
+    * blind success **> 50 %** -- the task is effectively solvable without vision. Widen
+      ``events.reset_object_position.pose_range`` and re-verify the expert before proceeding;
+      training a visuomotor policy against this spawn range would prove nothing.
+    * blind success **< 30 %** -- vision is genuinely required. Proceed.
+    * in between -- widen anyway; the margin is too thin to attribute a later result to the image.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        # Everything else (joint_pos, joint_vel, goal command, last_action) stays, so the only
+        # difference from the trained 92% policy is knowledge of where the cube is.
+        self.observations.policy.object_position = None
+
+
+@configclass
+class SO101CubePickPlaceWideEnvCfg(SO101CubePickPlaceEnvCfg):
+    """Pick-and-place with a spawn patch wide enough that vision is required.
+
+    Used if the blind baseline scores too well. Doubles the jitter to 0.12 x 0.20 m, which is
+    most of the reachable tabletop for a 0.30 m arm, so the cube's location genuinely cannot be
+    guessed from the goal command alone.
+    """
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.events.reset_object_position.params["pose_range"] = {
+            "x": (-0.06, 0.06),
+            "y": (-0.10, 0.10),
+            "z": (0.0, 0.0),
+        }
+
+
+@configclass
+class SO101CubePickPlaceWideBlindEnvCfg(SO101CubePickPlaceWideEnvCfg):
+    """Blind baseline on the wide spawn range -- confirms the widening actually helped."""
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        self.observations.policy.object_position = None

@@ -54,3 +54,38 @@ gym.register(
         "default_agent": "rsl_rl",
     },
 )
+
+# --- kill-check and wide-spawn variants (see docs/DESIGN_visuomotor_flow_matching.md, K1) ---
+
+gym.register(
+    id="SO101-PickPlace-Blind-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": "so101_scene.pick_place_env_cfg:SO101CubePickPlaceBlindEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}.rsl_rl_ppo_cfg:SO101PickPlacePPORunnerCfg",
+        "default_agent": "rsl_rl",
+    },
+)
+
+gym.register(
+    id="SO101-PickPlace-Wide-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": "so101_scene.pick_place_env_cfg:SO101CubePickPlaceWideEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}.rsl_rl_ppo_cfg:SO101PickPlacePPORunnerCfg",
+        "default_agent": "rsl_rl",
+    },
+)
+
+gym.register(
+    id="SO101-PickPlace-WideBlind-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": "so101_scene.pick_place_env_cfg:SO101CubePickPlaceWideBlindEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}.rsl_rl_ppo_cfg:SO101PickPlacePPORunnerCfg",
+        "default_agent": "rsl_rl",
+    },
+)

@@ -20,8 +20,8 @@ import sys
 import time
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
-TRAIN = REPO / "scripts" / "train.py"
+REPO = Path(__file__).resolve().parents[2]
+TRAIN = REPO / "experiment" / "scripts" / "train.py"
 
 _SPS = re.compile(r"Steps per second:\s*([0-9.]+)")
 _ITER_T = re.compile(r"Iteration time:\s*([0-9.]+)s")
