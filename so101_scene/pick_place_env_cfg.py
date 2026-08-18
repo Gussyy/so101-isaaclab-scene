@@ -13,7 +13,7 @@ constant below is resized accordingly; see the notes on each block.
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg, NewtonShapeCfg
 from isaaclab_physx.physics import PhysxCfg
 
-from isaaclab.assets import RigidObjectCfg
+from isaaclab.assets import ArticulationCfg, RigidObjectCfg
 from isaaclab.physics import PhysxAutoCfg
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import FrameTransformerCfg
@@ -51,6 +51,27 @@ CUBE_SIZE = 0.025
 # scripts/measure_ee.py, not guessed -- the world-frame delta is (+0.0094, -0.0125,
 # +0.0091), so using it directly would put the grasp frame on the wrong axis.
 EE_GRASP_OFFSET = (0.0101, 0.0094, -0.0117)
+
+# SO101_CFG's default joint pose is all zeros, which extends the arm straight up and along
+# -y -- 0.36 m from a cube sitting 0.18 m away in +x. With reaching_object's std of 0.04 that
+# scores identically 0.0, so PPO sees no gradient at all and collapses (measured: 261
+# iterations, every task reward term exactly 0.0, policy std 1.00 -> 0.03).
+#
+# Two corrections, both taken from Isaac Lab's own SO-101 stack task:
+#   * a mid-range crouch, so the gripper starts above the workspace pointing down rather
+#     than fully extended on its boundary singularity;
+#   * a 90-deg base yaw, so the arm faces +x where the cube and command targets live.
+# NOTE rot is (x, y, z, w) in Isaac Lab 3.0 -- the quaternion convention changed from wxyz
+# in 2.x, and silently feeding a wxyz value here yaws the base to the wrong place.
+SO101_INIT_JOINT_POS = {
+    "shoulder_pan": 0.0,
+    "shoulder_lift": -0.6,
+    "elbow_flex": 0.8,
+    "wrist_flex": 0.6,
+    "wrist_roll": 0.0,
+    "gripper": 0.0,
+}
+SO101_BASE_ROT = (0.0, 0.0, 0.70710678, 0.70710678)
 
 
 
@@ -117,6 +138,11 @@ class SO101CubePickPlaceEnvCfg(LiftEnvCfg):
         self.sim.physics = PickPlacePhysicsCfg()
 
         self.scene.robot = so101_cfg("{ENV_REGEX_NS}/Robot")
+        self.scene.robot.init_state = ArticulationCfg.InitialStateCfg(
+            pos=(0.0, 0.0, 0.0),
+            rot=SO101_BASE_ROT,
+            joint_pos=SO101_INIT_JOINT_POS,
+        )
 
         # 5 arm joints drive the pose; the jaw is a separate binary open/close action.
         self.actions.arm_action = mdp.JointPositionActionCfg(
@@ -184,10 +210,12 @@ class SO101CubePickPlaceEnvCfg(LiftEnvCfg):
             ],
         )
 
-        # Reward geometry rescaled ~3x tighter than the Franka defaults, matching the ~3x
-        # smaller arm. Left at Franka scale, "close enough" spans the whole workspace and
-        # the shaping carries no gradient.
-        self.rewards.reaching_object.params["std"] = 0.04
+        # Shaping width tracks the *starting* EE-object distance, not the arm length.
+        # Measured start distance is 0.177 m (scripts/diagnose_scene.py), where
+        # 1 - tanh(d/std) gives: std=0.04 -> 0.0003, 0.08 -> 0.024, 0.10 -> 0.056.
+        # An earlier 0.04 -- picked by scaling Franka's 0.1 down for a 3x smaller arm --
+        # left the term at 0.0003 for the whole run, i.e. no gradient, and PPO collapsed.
+        self.rewards.reaching_object.params["std"] = 0.10
         self.rewards.lifting_object.params["minimal_height"] = 0.025
         self.rewards.object_goal_tracking.params["minimal_height"] = 0.025
         self.rewards.object_goal_tracking.params["std"] = 0.12
