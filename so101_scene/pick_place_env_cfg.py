@@ -10,7 +10,15 @@ Retargeting from the Franka reference is not just a robot swap -- the SO-101 is 
 constant below is resized accordingly; see the notes on each block.
 """
 
-from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg, NewtonCollisionPipelineCfg, NewtonShapeCfg
+from isaaclab_newton.physics import (
+    MJWarpSolverCfg,
+    NewtonCfg,
+    NewtonCollisionPipelineCfg,
+    NewtonShapeCfg,
+    NewtonSoftContactCfg,
+    VBDSolverCfg,
+)
+from isaaclab_contrib.coupling import CouplerEntryCfg, CouplerProxyCfg, CouplerProxyMappingCfg
 from isaaclab_physx.physics import PhysxCfg
 
 from isaaclab.assets import ArticulationCfg, RigidObjectCfg
@@ -122,6 +130,94 @@ class PickPlacePhysicsCfg(PresetCfg):
         # one per step: fewer CPU-side launches per frame, which is where a 20-thread CPU
         # feeding thousands of envs actually bottlenecks.
         use_cuda_graph=True,
+    )
+    # Rigid arm on MuJoCo-Warp, deformables on VBD, coupled. Required by `cloth` and
+    # `soft_body` objects -- under the other backends they spawn and then sit inert.
+    #
+    # Structure copied from Isaac Lab's shipped cloth task
+    # (isaaclab_tasks/core/lift/config/franka_soft/franka_cloth_env_cfg.py) rather than from the
+    # class defaults, because that one demonstrably works. Two things in it are load-bearing:
+    #
+    #   * the proxy maps only the *gripper* bodies into the soft solver, not the whole arm.
+    #     Every rigid body represented there costs contact work against every particle, so this
+    #     is the difference between a scene that runs and one that crawls.
+    #   * `enable_rigid_soft_full_surface_contact` -- without it a thin sheet slips through the
+    #     jaw rather than being pinched.
+    newton_vbd = NewtonCfg(
+        solver_cfg=CouplerProxyCfg(
+            entries=[
+                CouplerEntryCfg(
+                    name="rigid",
+                    solver_cfg=MJWarpSolverCfg(
+                        cone="elliptic",
+                        ls_iterations=20,
+                        integrator="implicitfast",
+                    ),
+                    # Every rigid body in the scene has to belong to an entry, not just the
+                    # arm. The cube was left out of the first version of this and the run died
+                    # with a CUDA illegal memory access the moment the cloth reached it -- the
+                    # shipped Franka task lists its supports here for the same reason.
+                    bodies=[
+                        r"/World/envs/env_[^/]+/Robot",
+                        r"/World/envs/env_[^/]+/Object",
+                    ],
+                ),
+                CouplerEntryCfg(
+                    name="soft",
+                    solver_cfg=VBDSolverCfg(
+                        iterations=10,
+                        rigid_body_particle_contact_buffer_size=8192,
+                    ),
+                    all_particles=True,
+                    include_static_shapes=True,
+                ),
+            ],
+            proxies=[
+                CouplerProxyMappingCfg(
+                    source="rigid",
+                    destination="soft",
+                    # The pinch, and only the pinch. `gripper` carries the fixed finger,
+                    # `moving_jaw_so101_v1` is the one that closes -- see scripts/scene_demo.py
+                    # for where those names come from.
+                    # What the deformable can actually feel. Being in the "rigid" entry above
+                    # is not enough -- this list is what gets represented inside the soft
+                    # solver, and a body missing here is invisible to the cloth. Leaving the
+                    # cube out made a sheet dropped onto it fall straight through and land
+                    # perfectly flat, which reads as "the cloth is not simulating" when in fact
+                    # it was simulating a free fall correctly.
+                    #
+                    # Keep this list short: every entry costs contact work against every
+                    # particle, every substep.
+                    bodies=[
+                        r"/World/envs/env_[^/]+/Robot/gripper",
+                        r"/World/envs/env_[^/]+/Robot/moving_jaw_so101_v1",
+                        r"/World/envs/env_[^/]+/Object",
+                    ],
+                    collide_interval=1,
+                    # The shipped Franka cloth task sets
+                    # enable_rigid_soft_full_surface_contact=True here. We cannot: that mode
+                    # samples each rigid shape's signed-distance field, the SO-101's collision
+                    # shapes are meshes with no SDF, and Isaac Lab's NewtonShapeCfg exposes no
+                    # way to ask for one (its fields are margin, gap, ke, kd, mu). Enabling it
+                    # raises at finalize, naming every shape.
+                    #
+                    # So contacts are per-particle. The practical consequence is that the cloth
+                    # is only as grippable as its particle spacing is fine: the jaw is ~36 mm,
+                    # so at 8x8 over a 120 mm sheet (15 mm spacing) it can catch between
+                    # particles. Hence the denser default in configs/cloth.yaml.
+                    collision_pipeline=NewtonCollisionPipelineCfg(),
+                )
+            ],
+            iterations=1,
+        ),
+        soft_contact_cfg=NewtonSoftContactCfg(
+            soft_contact_ke=8.0e3,
+            soft_contact_kd=1.0e-2,
+            # High, deliberately: a single jaw pinching a sheet is friction-limited in the same
+            # way it is on the rigid cube, only more so.
+            soft_contact_mu=10.0,
+        ),
+        num_substeps=2,
     )
     physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx)
     default = isaacsim_physx

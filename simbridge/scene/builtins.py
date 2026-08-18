@@ -187,6 +187,100 @@ def _ycb(spec: dict[str, Any]) -> RigidObjectCfg:
     )
 
 
+# --------------------------------------------------------------- deformables
+#
+# Cloth and soft bodies run on Newton's VBD solver, so a config declaring one must also select
+# a backend that can simulate it: `sim.physics: newton_vbd`. Under PhysX or plain MJWarp the
+# asset spawns and then sits inert, which is a confusing way to fail -- so the builder checks.
+#
+# The numbers below are the ones Isaac Lab's own shipped cloth task uses
+# (isaaclab_tasks/core/lift/config/franka_soft/franka_cloth_env_cfg.py), not the class defaults,
+# which are an order of magnitude stiffer and were not chosen for a scene like this. They are
+# still solver stiffnesses rather than material properties: nothing here has been identified
+# against a real fabric. See docs/PHYSICS.md.
+
+
+@register_object("cloth")
+def _cloth(spec: dict[str, Any]) -> Any:
+    """A rectangular sheet of cloth. Needs ``sim.physics: newton_vbd``.
+
+    ``resolution`` is the performance dial and the fidelity dial at once: it is the particle grid,
+    so 8x8 is 64 particles per environment and 32x32 is 1024. Isaac Lab's shipped cloth task uses
+    8x8.
+    """
+    from isaaclab.assets.deformable_object import DeformableObjectCfg
+    from isaaclab_newton.sim.schemas import NewtonDeformableBodyPropertiesCfg
+    from isaaclab_newton.sim.spawners.materials import NewtonSurfaceDeformableBodyMaterialCfg
+
+    size = tuple(spec.get("size", (0.12, 0.12)))
+    res = tuple(int(v) for v in spec.get("resolution", (8, 8)))
+    return DeformableObjectCfg(
+        prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/Cloth"),
+        init_state=DeformableObjectCfg.InitialStateCfg(
+            pos=_pos(spec, default=(0.20, 0.0, 0.02)),
+            rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        ),
+        spawn=sim_utils.MeshRectangleCfg(
+            size=size,
+            resolution=res,
+            deformable_props=NewtonDeformableBodyPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=tuple(spec.get("color", (0.95, 0.85, 0.10)))
+            ),
+            physics_material=NewtonSurfaceDeformableBodyMaterialCfg(
+                density=float(spec.get("density", 1.0)),
+                particle_radius=float(spec.get("particle_radius", 0.002)),
+                tri_ke=float(spec.get("tri_ke", 5e2)),      # in-plane stretch
+                tri_ka=float(spec.get("tri_ka", 5e2)),      # in-plane shear
+                tri_kd=float(spec.get("tri_kd", 1e-3)),
+                edge_ke=float(spec.get("edge_ke", 0.5)),    # bending; low = drapes, high = card
+                edge_kd=float(spec.get("edge_kd", 1e-3)),
+            ),
+        ),
+    )
+
+
+@register_object("soft_body")
+def _soft_body(spec: dict[str, Any]) -> Any:
+    """A solid deformable block. Needs ``sim.physics: newton_vbd``.
+
+    Volume deformables are tetrahedralised at spawn by ``pytetwild``, which is the
+    ``tetrahedralization`` extra and is not part of a default Isaac Lab install::
+
+        pip install "pytetwild[all]>=0.3.0,<0.4"
+
+    ``k_mu`` and ``k_lambda`` are the Lame parameters: ``k_mu`` resists shear, ``k_lambda``
+    resists volume change. Raising both together makes it stiffer; raising only ``k_lambda``
+    makes it more like a water balloon.
+    """
+    from isaaclab.assets.deformable_object import DeformableObjectCfg
+    from isaaclab_newton.sim.schemas import NewtonDeformableBodyPropertiesCfg
+    from isaaclab_newton.sim.spawners.materials import NewtonDeformableBodyMaterialCfg
+
+    size = tuple(spec.get("size", (0.05, 0.05, 0.05)))
+    return DeformableObjectCfg(
+        prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/SoftBody"),
+        init_state=DeformableObjectCfg.InitialStateCfg(
+            pos=_pos(spec, default=(0.20, 0.0, size[2] / 2)),
+            rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        ),
+        spawn=sim_utils.MeshCuboidCfg(
+            size=size,
+            deformable_props=NewtonDeformableBodyPropertiesCfg(),
+            visual_material=sim_utils.PreviewSurfaceCfg(
+                diffuse_color=tuple(spec.get("color", (0.25, 0.75, 0.35)))
+            ),
+            physics_material=NewtonDeformableBodyMaterialCfg(
+                density=float(spec.get("density", 100.0)),
+                particle_radius=float(spec.get("particle_radius", 0.005)),
+                k_mu=float(spec.get("k_mu", 2e4)),
+                k_lambda=float(spec.get("k_lambda", 2e4)),
+                k_damp=float(spec.get("k_damp", 0.1)),
+            ),
+        ),
+    )
+
+
 @register_object("usd")
 def _usd(spec: dict[str, Any]) -> RigidObjectCfg:
     """Any USD asset by path or URL."""

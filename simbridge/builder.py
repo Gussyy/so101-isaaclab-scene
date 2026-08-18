@@ -83,6 +83,32 @@ def check_pickable(cfg: dict[str, Any], names: list[str]) -> list[str]:
     return out
 
 
+# Object types that only simulate under a VBD-capable backend.
+_DEFORMABLE_TYPES = {"cloth", "soft_body"}
+
+
+def check_deformables(cfg: dict[str, Any]) -> None:
+    """Refuse a config that declares a deformable without a solver that can move it.
+
+    Under PhysX or plain MJWarp the asset spawns, renders, and never moves -- the deformable
+    builder hook is only installed by the VBD manager. That reads as "my cloth is broken" rather
+    than "my backend cannot simulate cloth", so it is worth an error at parse time.
+    """
+    objects = (cfg.get("scene") or {}).get("objects") or {}
+    found = {n: sp.get("type") for n, sp in objects.items()
+             if isinstance(sp, dict) and sp.get("type") in _DEFORMABLE_TYPES}
+    if not found:
+        return
+    physics = (cfg.get("sim") or {}).get("physics")
+    if physics != "newton_vbd":
+        listed = ", ".join(f"{n} ({t})" for n, t in sorted(found.items()))
+        raise ValueError(
+            f"config declares deformable object(s) -- {listed} -- but sim.physics is "
+            f"{physics or 'unset (the task default, PhysX)'}. Deformables only simulate under "
+            "the coupled VBD backend; set 'sim.physics: newton_vbd'."
+        )
+
+
 def load_config(path: str | Path) -> dict[str, Any]:
     """Read and structurally validate a scene/task YAML."""
     path = Path(path)
@@ -114,6 +140,8 @@ def load_config(path: str | Path) -> dict[str, Any]:
 
         for w in check_pickable(cfg, parsed.pick_names):
             print(f"[config] warning: {w}")
+
+    check_deformables(cfg)
 
     render = cfg.get("render") or {}
     # YAML 1.1 parses bare Off/On/Yes/No as booleans, so `antialiasing: Off` arrives as False.

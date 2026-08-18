@@ -1,0 +1,73 @@
+# A sheet of cloth in the SO-101 scene, simulated by Newton's VBD solver.
+#
+#   python scripts/run.py --config configs/cloth.yaml --describe
+#   python scripts/run.py --config configs/cloth.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  READ THIS BEFORE BELIEVING THE CLOTH
+#  tri_ke / tri_ka / edge_ke are SOLVER STIFFNESSES, not material properties. Nothing
+#  here has been identified against a real fabric. The values are the ones Isaac Lab's
+#  own shipped cloth task uses, chosen because they simulate stably -- not because they
+#  match anything you could buy. Treat the behaviour as plausible, not predictive.
+#  docs/PHYSICS.md says what that costs you.
+#
+#  WHAT THE DIALS DO
+#    resolution   the particle grid, and the whole performance story. 8x8 = 64 particles
+#                 per env; 32x32 = 1024. Cost is particles x substeps x iterations.
+#    tri_ke/ka    in-plane stretch and shear. High = canvas, low = jersey.
+#    edge_ke      bending. Low drapes and folds; high behaves like card.
+#    density      areal density. 1.0 is light.
+#
+#  It starts above the task's 2.5 cm cube on purpose. A flat sheet dropped on a flat table
+#  lands flat and shows you nothing -- the first version of this config did exactly that and
+#  looked inert while simulating perfectly well. Draping over an obstacle is the cheapest
+#  thing that actually exercises bending.
+#
+#  The task machinery still tracks the rigid cube -- rewards, terminations and the goal
+#  command are all about `object`. The cloth is here to interact with, not to be scored
+#  on. Drive it with the keyboard and push it around.
+# =====================================================================================
+
+meta:
+  name: so101-cloth
+  notes: Deformable demo. No policy has been trained against this.
+
+task: pick_place
+
+scene:
+  num_envs: 4          # deformables are particle-based; this is tens, not thousands
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    collision_approximation: convexHull
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+  objects:
+    cloth:
+      type: cloth
+      size: [0.12, 0.12]
+      resolution: [16, 16]    # 256 particles; ~8 mm spacing against a ~36 mm jaw
+      pos: [0.20, 0.0, 0.09]      # above the task cube, clear of the jaw (which sits at z~0.185)
+      color: [0.95, 0.85, 0.10]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.55, 0.42, 0.34]
+      look_at: [0.16, 0.0, 0.05]
+      focal_length: 22.0
+
+sim:
+  episode_length_s: 60.0          # long: nothing here is being scored, so do not reset it
+  physics: newton_vbd
+
+control:
+  source: zero
+  action_horizon: 1
