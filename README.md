@@ -89,6 +89,46 @@ def _widget(spec):
     return RigidObjectCfg(...)
 ```
 
+## Keyboard teleop
+
+Two ways, depending on where you want focus.
+
+**In the Isaac Sim window** — `control.source: keyboard`:
+
+```bash
+python scripts/run.py --config configs/pick_place_keyboard.yaml --steps 0
+```
+
+**From a separate terminal, over ZeroMQ** — same path a policy server uses:
+
+```bash
+# terminal 1
+python scripts/teleop_server.py --action-dim 6
+
+# terminal 2
+python scripts/run.py --config configs/pick_place_teleop.yaml
+```
+
+| key | joint |
+|---|---|
+| `Q` / `A` | shoulder_pan |
+| `W` / `S` | shoulder_lift |
+| `E` / `D` | elbow_flex |
+| `R` / `F` | wrist_flex |
+| `T` / `G` | wrist_roll |
+| `space` | toggle gripper |
+| `N` | zero all targets |
+
+Keys move a held target rather than applying a per-frame delta, so the arm stays where you put
+it instead of springing back when you stop typing.
+
+Joints are driven directly rather than through IK. Isaac Lab's `Se3Keyboard` emits end-effector
+deltas, which need a solver — and on a 5-DOF arm that solver has to soft-weight orientation,
+since the SO-101 cannot reach an arbitrary 6-DOF pose. Direct joint control avoids it and matches
+the action space the tasks already use.
+
+Use a long `episode_length_s` for teleop. At the default 5s the episode resets mid-manipulation.
+
 ## Driving from another process
 
 Set `control.source: zmq` and the env becomes a client. The server imports no simulator, so the

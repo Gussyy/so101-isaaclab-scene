@@ -1,0 +1,30 @@
+# Keyboard teleoperation, in-process. Focus the Isaac Sim window and drive the joints.
+#
+#   python scripts/run.py --config configs/pick_place_keyboard.yaml --steps 0
+#
+# Keys: Q/A W/S E/D R/F T/G per joint, SPACE toggles the gripper, N zeroes the targets.
+# For keyboard control from a separate process instead, run scripts/teleop_server.py and use
+# configs/pick_place_teleop.yaml.
+meta:
+  name: so101-pick-place-keyboard
+  notes: Few envs, since teleoperating 256 arms at once is not useful.
+
+task: pick_place
+
+scene:
+  num_envs: 4
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos: {shoulder_pan: 0.0, shoulder_lift: -0.6, elbow_flex: 0.8, wrist_flex: 0.6, wrist_roll: 0.0, gripper: 0.0}
+
+sim:
+  episode_length_s: 60.0     # long, so an episode does not reset mid-manipulation
+
+control:
+  source: keyboard
+  transport: inprocess
+  step: 0.05                 # target change per keypress
+  broadcast: true            # same command to every env
+  action_horizon: 1
