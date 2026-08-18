@@ -61,6 +61,12 @@ def test_self_checks() -> None:
         code, out = sh([PY, "-m", mod], timeout=180)
         record(f"python -m {mod}", code == 0, out.strip().splitlines()[-1] if out.strip() else "")
 
+    # Run as a path: the package import already registered these factories, and -m would run the
+    # file again into a registry that rejects duplicate names.
+    code, out = sh([PY, "simbridge/scene/builtins.py"], timeout=180)
+    record("python simbridge/scene/builtins.py", code == 0,
+           out.strip().splitlines()[-1] if out.strip() else "")
+
 
 def test_configs() -> None:
     print("\nevery config parses")
@@ -73,9 +79,9 @@ def test_configs() -> None:
         "('reach','SO101-Reach-v0'),('reach_play','SO101-Reach-Play-v0'))];"
         "import sys as s; c = load_config(s.argv[1]); print(describe(c))"
     )
-    for cfg in sorted((REPO / "configs").glob("*.yaml")):
+    for cfg in sorted((REPO / "configs").rglob("*.yaml")):
         code, out = sh([PY, "-c", src, str(cfg)], timeout=120)
-        record(f"configs/{cfg.name}", code == 0, out.strip().splitlines()[-1] if out.strip() else "")
+        record(f"configs/{cfg.relative_to(REPO / 'configs').as_posix()}", code == 0, out.strip().splitlines()[-1] if out.strip() else "")
 
 
 def test_objective_grammar() -> None:

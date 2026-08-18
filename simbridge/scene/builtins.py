@@ -99,18 +99,77 @@ def _usd(spec: dict[str, Any]) -> RigidObjectCfg:
 
 # --------------------------------------------------------------- cameras
 
+def look_at_quat(pos, target, up=(0.0, 0.0, 1.0)) -> tuple[float, float, float, float]:
+    """Orientation that points a camera at ``target``, as (x, y, z, w) in the *world* convention.
+
+    Aiming a camera by writing a quaternion by hand is not a thing anyone can do, and getting it
+    wrong is not obvious from the config -- it is obvious from a rendered frame of the floor,
+    which is two minutes of Isaac Sim later. ``look_at`` states the intent instead.
+
+    World convention: the camera looks along its +X axis with +Z up, which is the one of Isaac
+    Lab's three that reads like a position in the scene rather than a graphics convention.
+    """
+    import math
+
+    f = [t - p for t, p in zip(target, pos)]
+    n = math.sqrt(sum(c * c for c in f))
+    if n < 1e-9:
+        raise ValueError(f"camera look_at target {tuple(target)} coincides with its position")
+    x_axis = [c / n for c in f]
+
+    # Re-orthogonalise `up` against the view direction. A camera looking straight down has `up`
+    # parallel to it, which leaves no valid frame -- fall back to +X so the result is still sane.
+    d = sum(u * a for u, a in zip(up, x_axis))
+    z_axis = [u - d * a for u, a in zip(up, x_axis)]
+    n = math.sqrt(sum(c * c for c in z_axis))
+    if n < 1e-6:
+        z_axis = [1.0 - x_axis[0] * x_axis[0], -x_axis[0] * x_axis[1], -x_axis[0] * x_axis[2]]
+        n = math.sqrt(sum(c * c for c in z_axis))
+    z_axis = [c / n for c in z_axis]
+    y_axis = [
+        z_axis[1] * x_axis[2] - z_axis[2] * x_axis[1],
+        z_axis[2] * x_axis[0] - z_axis[0] * x_axis[2],
+        z_axis[0] * x_axis[1] - z_axis[1] * x_axis[0],
+    ]
+
+    # Columns are the camera axes expressed in world coordinates.
+    m = [[x_axis[i], y_axis[i], z_axis[i]] for i in range(3)]
+    tr = m[0][0] + m[1][1] + m[2][2]
+    if tr > 0.0:
+        s = math.sqrt(tr + 1.0) * 2.0
+        w, x, y, z = 0.25 * s, (m[2][1] - m[1][2]) / s, (m[0][2] - m[2][0]) / s, (m[1][0] - m[0][1]) / s
+    elif m[0][0] > m[1][1] and m[0][0] > m[2][2]:
+        s = math.sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0
+        w, x, y, z = (m[2][1] - m[1][2]) / s, 0.25 * s, (m[0][1] + m[1][0]) / s, (m[0][2] + m[2][0]) / s
+    elif m[1][1] > m[2][2]:
+        s = math.sqrt(1.0 + m[1][1] - m[0][0] - m[2][2]) * 2.0
+        w, x, y, z = (m[0][2] - m[2][0]) / s, (m[0][1] + m[1][0]) / s, 0.25 * s, (m[1][2] + m[2][1]) / s
+    else:
+        s = math.sqrt(1.0 + m[2][2] - m[0][0] - m[1][1]) * 2.0
+        w, x, y, z = (m[1][0] - m[0][1]) / s, (m[0][2] + m[2][0]) / s, (m[1][2] + m[2][1]) / s, 0.25 * s
+    return (x, y, z, w)          # Isaac Lab 3.0 order; 2.x was (w, x, y, z)
+
+
 @register_camera("tiled")
 def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
     """TiledCamera: the batched renderer. Measured ~27k frames/s at 128px on a 4070 Ti,
-    with cost flat per step regardless of env count -- see docs/bench_camera.txt."""
+    with cost flat per step regardless of env count -- see docs/bench_camera.txt.
+
+    Aim it with ``look_at: [x, y, z]`` (env-relative), or with an explicit ``rot`` quaternion.
+    """
     res = spec.get("resolution", [128, 128])
+    pos = _pos(spec, default=(0.55, 0.0, 0.35))
+    if "look_at" in spec:
+        if "rot" in spec:
+            raise ValueError("camera takes look_at or rot, not both")
+        rot = look_at_quat(pos, tuple(spec["look_at"]), tuple(spec.get("up", (0.0, 0.0, 1.0))))
+        convention = "world"
+    else:
+        rot = tuple(spec.get("rot", (0.0, 0.259, 0.0, 0.966)))
+        convention = spec.get("convention", "opengl")
     return TiledCameraCfg(
         prim_path=spec["prim_path"],
-        offset=TiledCameraCfg.OffsetCfg(
-            pos=_pos(spec, default=(0.55, 0.0, 0.35)),
-            rot=tuple(spec.get("rot", (0.0, 0.259, 0.0, 0.966))),
-            convention=spec.get("convention", "opengl"),
-        ),
+        offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention=convention),
         data_types=list(spec.get("data_types", ["rgb"])),
         spawn=sim_utils.PinholeCameraCfg(
             focal_length=float(spec.get("focal_length", 18.0)),
@@ -119,3 +178,47 @@ def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
         width=int(res[0]),
         height=int(res[1]),
     )
+
+
+def demo() -> None:
+    """Self-check for look_at_quat: rotating the world axes must reproduce the view direction."""
+    import math
+
+    def rotate(q, v):
+        x, y, z, w = q
+        t = [2 * (y * v[2] - z * v[1]), 2 * (z * v[0] - x * v[2]), 2 * (x * v[1] - y * v[0])]
+        return [v[i] + w * t[i] + (y * t[2] - z * t[1], z * t[0] - x * t[2], x * t[1] - y * t[0])[i]
+                for i in range(3)]
+
+    for pos, target in (((0.5, 0.0, 0.3), (0.0, 0.0, 0.0)),
+                        ((0.6, -0.5, 0.4), (0.18, 0.0, 0.08)),
+                        ((0.0, 0.0, 1.0), (0.0, 0.0, 0.0)),      # straight down: up is degenerate
+                        ((-0.3, 0.4, 0.2), (0.2, -0.1, 0.05))):
+        q = look_at_quat(pos, target)
+        assert abs(math.sqrt(sum(c * c for c in q)) - 1.0) < 1e-6, f"not unit: {q}"
+
+        # The camera's +X axis, rotated into the world, must point from pos to target.
+        fwd = rotate(q, (1.0, 0.0, 0.0))
+        want = [t - p for t, p in zip(target, pos)]
+        n = math.sqrt(sum(c * c for c in want))
+        want = [c / n for c in want]
+        assert all(abs(a - b) < 1e-6 for a, b in zip(fwd, want)), f"{pos}->{target}: {fwd} != {want}"
+
+        # +Z must stay as close to world up as the view allows: never below the horizon.
+        assert rotate(q, (0.0, 0.0, 1.0))[2] > -1e-6, f"{pos}->{target}: camera is upside down"
+
+    try:
+        look_at_quat((0.1, 0.1, 0.1), (0.1, 0.1, 0.1))
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("a target equal to the position should be rejected")
+
+    print("scene builtins OK: look_at aims the camera, stays upright, rejects a degenerate target")
+
+
+if __name__ == "__main__":
+    # Run as a path, not `-m`: importing the package registers these factories once already,
+    # and `-m` would execute this file a second time into a registry that rejects duplicates.
+    #     python simbridge/scene/builtins.py
+    demo()

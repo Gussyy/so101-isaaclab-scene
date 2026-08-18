@@ -1,0 +1,12 @@
+﻿configs/variants/goal_centre.yaml
+  sequence: "pick[object] place[0.0, 0.20, 0.08]"
+  object           (+0.2000, -0.0000, +0.0095)
+  command (root frame) (+0.2000, +0.0000, +0.0800)
+  command (env frame)  (-0.0000, +0.2000, +0.0800)
+
+configs/variants/goal_left.yaml
+  sequence: "pick[object] place[0.09, 0.20, 0.16]"
+  object           (+0.2000, -0.0000, +0.0095)
+  command (root frame) (+0.2000, -0.0900, +0.1600)
+  command (env frame)  (+0.0900, +0.2000, +0.1600)
+

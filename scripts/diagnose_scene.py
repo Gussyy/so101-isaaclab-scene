@@ -6,8 +6,12 @@ term: the console shows a flat curve but not *why*. This prints where the robot 
 end-effector, the object and the command target actually are, which turns "it will not
 learn" into a number you can act on.
 
+Takes a registered task id, or a YAML config -- a config-built scene is the one whose geometry
+is easiest to get wrong, since nothing in the YAML says where anything ends up.
+
 Usage:
     python scripts/diagnose_scene.py --task SO101-PickPlace-v0 --num_envs 2
+    python scripts/diagnose_scene.py --config configs/variants/goal_centre.yaml
 """
 
 import argparse
@@ -16,9 +20,22 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Dump task scene geometry.")
 parser.add_argument("--task", default="SO101-PickPlace-v0")
+parser.add_argument("--config", default=None, help="YAML config; overrides --task")
 parser.add_argument("--num_envs", type=int, default=2)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
+
+import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Cameras in the config mean the renderer must be on before the app launches.
+if args_cli.config:
+    from simbridge.builder import load_config as _load
+
+    if (_load(args_cli.config).get("scene") or {}).get("cameras"):
+        args_cli.enable_cameras = True
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -29,10 +46,23 @@ import torch  # noqa: E402
 import so101_scene  # noqa: F401,E402
 from isaaclab_tasks.utils import parse_env_cfg  # noqa: E402
 
+from simbridge.builder import build_env_cfg, load_config, resolve_task  # noqa: E402
+from simbridge.registry import register_task  # noqa: E402
+
+register_task("pick_place", "SO101-PickPlace-v0")
+register_task("pick_place_play", "SO101-PickPlace-Play-v0")
+register_task("reach", "SO101-Reach-v0")
+
 
 def main() -> None:
-    cfg = parse_env_cfg(args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
-    env = gym.make(args_cli.task, cfg=cfg).unwrapped
+    if args_cli.config:
+        raw = load_config(args_cli.config)
+        task = resolve_task(raw)
+        cfg = build_env_cfg(raw, device=args_cli.device, num_envs=args_cli.num_envs)
+    else:
+        task = args_cli.task
+        cfg = parse_env_cfg(task, device=args_cli.device, num_envs=args_cli.num_envs)
+    env = gym.make(task, cfg=cfg).unwrapped
     env.reset()
     for _ in range(5):
         env.step(torch.zeros(env.action_space.shape, device=env.device))
@@ -48,7 +78,7 @@ def main() -> None:
     op = obj.data.root_pos_w.torch[0] - origin
 
     print("\n" + "=" * 68)
-    print(f"{args_cli.task}  (env-local frame)")
+    print(f"{args_cli.config or args_cli.task}  (env-local frame)")
     print("=" * 68)
     print(f"  robot base       ({base[0]:+.4f}, {base[1]:+.4f}, {base[2]:+.4f})")
     print(f"  ee 'gripper'     ({ee[0]:+.4f}, {ee[1]:+.4f}, {ee[2]:+.4f})")
@@ -61,9 +91,20 @@ def main() -> None:
         print(f"  ee_frame target  ({tgt[0]:+.4f}, {tgt[1]:+.4f}, {tgt[2]:+.4f})")
         print(f"  |ee_frame - obj| {torch.norm(tgt - op).item():.4f} m")
 
+    q = robot.data.root_quat_w.torch[0]
+    print(f"  base rot (xyzw)  ({q[0]:+.4f}, {q[1]:+.4f}, {q[2]:+.4f}, {q[3]:+.4f})")
+
     try:
         cmd = env.command_manager.get_command("object_pose")[0]
         print(f"  command (root frame) ({cmd[0]:+.4f}, {cmd[1]:+.4f}, {cmd[2]:+.4f})")
+        # The same target in the frame the config's `spawn` and the camera's `look_at` use.
+        # These are different frames whenever the base is rotated, which is the single easiest
+        # thing to get wrong in a config: a goal written like a table coordinate lands elsewhere.
+        from isaaclab.utils.math import quat_apply
+
+        goal_w = quat_apply(q.unsqueeze(0), cmd[:3].unsqueeze(0))[0] + robot.data.root_pos_w.torch[0] - origin
+        print(f"  command (env frame)  ({goal_w[0]:+.4f}, {goal_w[1]:+.4f}, {goal_w[2]:+.4f})")
+        print(f"  |object - goal|  {torch.norm(op - goal_w).item():.4f} m")
     except Exception as exc:  # noqa: BLE001
         print(f"  command: unavailable ({exc})")
 

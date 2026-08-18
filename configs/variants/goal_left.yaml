@@ -1,0 +1,51 @@
+# goal_centre.yaml with ONE line changed: the place target.
+#   place[0.0, 0.20, 0.08]  ->  place[0.09, 0.20, 0.16]
+# Same policy, same cube, same camera. The arm carries it somewhere else.
+
+meta:
+  name: variant-goal-left
+  notes: Fixed spawn and fixed goal, so the only difference between clips is the edited line.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  spawn: "box(0.20, 0.0, 0.0125, 0.0, 0.0, 0.0)"   # zero extents = one fixed spot
+  sequence: "pick[object] place[0.09, 0.20, 0.16]"
+
+scene:
+  num_envs: 1
+  env_spacing: 3.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+  objects:
+    object:
+      type: cuboid
+      size: [0.025, 0.025, 0.025]
+      color: [0.90, 0.25, 0.15]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.60, 0.55, 0.42]          # env frame, metres
+      look_at: [0.10, 0.10, 0.08]      # between the cube and the goal region
+      focal_length: 22.0
+
+sim:
+  episode_length_s: 5.0
+
+control:
+  # Local artefact of the 92%-success run; not committed. Retrain with
+  # experiment/scripts/train.py, or set source: zero to just look at the scene.
+  source: rl_checkpoint
+  checkpoint: logs/rsl_rl/pick_place_so101/2026-08-18_17-22-09/exported/policy.pt
+  action_horizon: 1

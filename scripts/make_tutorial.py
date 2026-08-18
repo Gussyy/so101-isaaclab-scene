@@ -156,6 +156,49 @@ def video_frames(path: Path, max_frames: int, size=(W, H)) -> list[Image.Image]:
         return []
 
 
+def side_by_side(clips: list[Path], captions: list[str], changed: list[bool],
+                 title: str, note: str, n: int = 200) -> list[Image.Image]:
+    """Three clips playing together, each captioned with the config line that produced it.
+
+    Side by side rather than one after another: the whole claim is that the configs differ in one
+    line, and a difference is far easier to see against a neighbour than against memory.
+    """
+    reels = []
+    for c in clips:
+        try:
+            import imageio.v3 as iio
+
+            reels.append([Image.fromarray(f[..., :3]) for i, f in enumerate(iio.imiter(c)) if i < n])
+        except Exception as exc:  # noqa: BLE001
+            print(f"  (could not read {c}: {exc})")
+            return []
+    if not all(reels):
+        return []
+
+    pw, ph = 400, 300
+    xs = [30, 440, 850]
+    out = []
+    for k in range(max(len(r) for r in reels)):
+        img = Image.new("RGB", (W, H), BG)
+        d = ImageDraw.Draw(img)
+        d.text((60, 40), title, font=F_STEP, fill=ACCENT)
+        for i, reel in enumerate(reels):
+            panel = reel[min(k, len(reel) - 1)].resize((pw, ph))
+            img.paste(panel, (xs[i], 110))
+            colour = GOOD if changed[i] else DIM
+            d.rectangle([xs[i] - 2, 108, xs[i] + pw + 1, 110 + ph + 1], outline=colour, width=2)
+            wrapped = textwrap.wrap(captions[i], 40)[:3]
+            for j, line in enumerate(wrapped):
+                d.text((xs[i], 430 + j * 24), line, font=F_SMALL, fill=colour)
+            if changed[i]:
+                d.text((xs[i], 434 + len(wrapped) * 24), "^ the edited line", font=F_SMALL, fill=GOOD)
+        d.line([(60, H - 88), (W - 60, H - 88)], fill=(40, 48, 58), width=2)
+        for i, line in enumerate(textwrap.wrap(note, 104)[:2]):
+            d.text((60, H - 74 + i * 26), line, font=F_SMALL, fill=ACCENT)
+        out.append(img)
+    return out
+
+
 def label(frames: list[Image.Image], text: str) -> list[Image.Image]:
     out = []
     for fr in frames:
@@ -270,6 +313,32 @@ def main() -> None:
     seq.append((terminal_card("STEP 4  an unreachable goal is rejected",
                               'sequence: "pick[random] place[random(0, 0, 0, r1)]"', rejection,
                               "A 1 m radius on an arm that reaches 0.35 m. Caught before the simulator starts."), int(5.0 * S)))
+
+    # ---- edit one line, get a different task. Real clips, captured per config.
+    variants = [REPO / f"docs/variants/{v}.mp4" for v in ("goal_centre", "goal_left", "object_blue")]
+    if all(v.exists() for v in variants):
+        seq.append((title_card("5. Edit one line, get a different task",
+                               "Three configs. Each differs from the first by a single line, and nothing else.",
+                               "STEP 5"), int(2.6 * S)))
+        seq.extend((f, 1) for f in side_by_side(
+            variants,
+            ['place[0.0, 0.20, 0.08]\nsize 0.025, red',
+             'place[0.09, 0.20, 0.16]\nsize 0.025, red',
+             'place[0.0, 0.20, 0.08]\nsize 0.030, blue'],
+            [False, True, True],
+            "STEP 5  one line changed, same everything else",
+            "Same task, same policy, same camera. Recorded per config by scripts/capture_clip.py.",
+            n=220,
+        ))
+        proof = clean((REPO / "docs/variants/goal_proof.txt").read_text(encoding="utf-8")
+                      if (REPO / "docs/variants/goal_proof.txt").exists() else "")
+        if proof:
+            seq.append((terminal_card(
+                "STEP 5  and the goal really moved",
+                "python scripts/diagnose_scene.py --config configs/variants/goal_left.yaml",
+                proof,
+                "The config's numbers, read back out of the running simulator. They match.",
+                max_lines=12), int(6.0 * S)))
 
     # simulator footage
     for clip, cap, n in (

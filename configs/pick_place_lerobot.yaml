@@ -23,7 +23,7 @@ objective:
   # Matches the distribution the checkpoint was trained on: x 0.15..0.25, y -0.10..0.10,
   # z 0.06..0.16. Narrowing it here would evaluate the expert off-distribution and the
   # success rate would collapse -- a 2% run is what that looks like.
-  sequence: "pick[random] place[box(0.20, 0.0, 0.11, 0.05, 0.10, 0.05)]"
+  sequence: "pick[random] place[box(0.0, 0.20, 0.11, 0.10, 0.05, 0.05)]"
 
 scene:
   num_envs: 128

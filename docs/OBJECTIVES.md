@@ -6,7 +6,7 @@ State what a task is trying to achieve in the config, as a pattern:
 objective:
   pickable: [object]
   spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
-  sequence: "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+  sequence: "pick[random] place[random(0.0, 0.20, 0.12, r0.06)]"
 ```
 
 It is parsed by a fixed grammar — a regex and a few dataclasses. No model generates or
@@ -34,16 +34,17 @@ Names are checked against `pickable`. A typo fails at parse time.
 
 | form | meaning |
 |---|---|
-| `place[0.20, 0.0, 0.12]` | fixed point |
-| `place[random(0.20, 0.0, 0.12, r0.06)]` | uniform in a disc of radius 0.06 m at that height |
-| `place[box(0.20, 0.0, 0.12, 0.03, 0.06, 0.02)]` | uniform in a box, centre then half-extents |
+| `place[0.0, 0.20, 0.12]` | fixed point |
+| `place[random(0.0, 0.20, 0.12, r0.06)]` | uniform in a disc of radius 0.06 m at that height |
+| `place[box(0.0, 0.20, 0.12, 0.10, 0.03, 0.02)]` | uniform in a box, centre then half-extents |
 
 The radius is written `r<R>`. `random(x, y, z, 0.06)` is rejected — without the prefix there is
 no way to tell a radius from a fourth coordinate.
 
-`spawn` takes the same region forms and sets where the object starts. Both are written in
-absolute coordinates in the robot's frame; `spawn` is converted to the offset Isaac Lab's reset
-event expects.
+`spawn` takes the same region forms and sets where the object starts. Both are written as
+absolute coordinates in the environment frame, and each is converted for you: `spawn` into the
+offset Isaac Lab's reset event expects, `place` into the robot root frame the command ranges use.
+See [Which frame the numbers are in](#which-frame-the-numbers-are-in).
 
 ## Where the SO-ARM101 can work
 
@@ -62,12 +63,34 @@ configurations — technically reachable, not usable.
 downward, and those reach 0.33 m rather than 0.35 m. A place target is only a position so this
 is not enforced, but a *pick* location outside it is unlikely to be graspable from above.
 
+## Which frame the numbers are in
+
+Every coordinate in a config is in the **environment frame** — the same frame as
+`scene.robot.pos` and a camera's `pos` / `look_at`.
+
+Isaac Lab's pose command ranges are in the robot *root* frame, and this arm's base is rotated
+90° about z, so `place` is converted for you by `simbridge.objective.to_root_frame`. Before that
+conversion existed, `place[0.20, 0.0, 0.10]` landed at env `(0.000, 0.200, 0.100)` — 0.30 m from
+a cube the same file spawned at `(0.200, 0.000, 0.010)`. Nothing reported it, because both
+positions were individually reachable.
+
+Read the goal back out of a running scene to check any config:
+
+```bash
+python scripts/diagnose_scene.py --config configs/variants/goal_left.yaml
+```
+
 Practical areas for a cube-on-table task:
 
 ```
 spawn (on the table)   x 0.15..0.26   y -0.10..0.10   z = half the cube height
-place (in the air)     x 0.14..0.26   y -0.10..0.10   z 0.05..0.20
+place (in the air)     x -0.10..0.10  y  0.15..0.25  z 0.06..0.16
 ```
+
+Those sit 90° apart around the base. That is inherited: the goal ranges come from upstream
+`contrib.lift`, written for a Franka, and this base is rotated, so the shipped checkpoint
+learned to carry the cube round to the side — at 92% success. Goals in front of the arm are
+just as legal and just as reachable; they need a retrain, since the checkpoint never saw them.
 
 ## Reach checking
 
@@ -108,7 +131,7 @@ expensive thing to debug than a config error.
 ![the objective running](objective_demo.gif)
 
 The policy picking the cube and carrying it to a goal sampled from
-`place[random(0.20, 0.0, 0.12, r0.06)]`. The goal moves between episodes because the region is a
+`place[random(0.0, 0.20, 0.12, r0.06)]`. The goal moves between episodes because the region is a
 disc, not a point.
 
 ## Trying it

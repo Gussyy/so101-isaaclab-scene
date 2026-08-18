@@ -6,13 +6,40 @@ checkpoint, a teleop device, a policy server in another process — is set in th
 
 Tested on Isaac Sim 6.0.1 / Isaac Lab 3.0, Windows 11, RTX 4070 Ti.
 
-## How to use it, in 69 seconds
+## How to use it, in 85 seconds
 
-![install, config, objective grammar, teleop and the policy socket](docs/tutorial.gif)
+![install, config, objective grammar, editing one line, teleop and the policy socket](docs/tutorial.gif)
 
 Every frame is real command output, captured by [`scripts/make_tutorial.py`](scripts/make_tutorial.py)
 rather than typed by hand — re-run it and the tutorial re-records itself. Sharper copy:
 [`docs/tutorial.mp4`](docs/tutorial.mp4) (720p).
+
+### Edit one line, get a different task
+
+Three configs in [`configs/variants/`](configs/variants/), each differing from the first by a
+single line. Same task, same policy, same camera; the clips are recorded per config by
+[`scripts/capture_clip.py`](scripts/capture_clip.py).
+
+| config | the line that differs | clip |
+|---|---|---|
+| `goal_centre.yaml` | `place[0.0, 0.20, 0.08]` | [mp4](docs/variants/goal_centre.mp4) |
+| `goal_left.yaml` | `place[0.09, 0.20, 0.16]` | [mp4](docs/variants/goal_left.mp4) |
+| `object_blue.yaml` | `size: [0.030…]`, `color: [0.20, 0.45, 0.95]` | [mp4](docs/variants/object_blue.mp4) |
+
+Read back out of the running simulator — the goal lands exactly where the config put it:
+
+```
+configs/variants/goal_centre.yaml   place[0.0, 0.20, 0.08]
+  command (env frame)  (-0.0000, +0.2000, +0.0800)
+configs/variants/goal_left.yaml     place[0.09, 0.20, 0.16]
+  command (env frame)  (+0.0900, +0.2000, +0.1600)
+```
+
+Check it yourself, on any config:
+
+```bash
+python scripts/diagnose_scene.py --config configs/variants/goal_left.yaml
+```
 
 For a worked example of driving the env with an RL policy, see [`experiment/`](experiment/).
 

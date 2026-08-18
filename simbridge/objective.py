@@ -131,6 +131,51 @@ class Box:
 Region = Point | Disc | Box
 
 
+def to_root_frame(region: Region, rot_xyzw) -> tuple[Region, list[str]]:
+    """Re-express an env-frame region in the robot's root frame.
+
+    Everything else a config states -- ``spawn``, ``scene.robot.pos``, a camera's ``pos`` and
+    ``look_at`` -- is in the environment frame. Isaac Lab's pose command ranges are in the robot
+    *root* frame, and every config here rotates the base 90 degrees about z, so writing a place
+    target straight into those ranges puts the goal 90 degrees around from where the config says.
+    Measured before this existed: ``place[0.20, 0.0, 0.10]`` landed at env (0.000, 0.200, 0.100),
+    0.297 m from a cube the same file spawned at (0.200, 0.000, 0.010).
+
+    Returns the converted region and any warnings.
+    """
+    qx, qy, qz, qw = (float(c) for c in rot_xyzw)
+    if abs(qx) > 1e-6 or abs(qy) > 1e-6:
+        raise ObjectiveError(
+            f"base rotation {tuple(rot_xyzw)} tilts the robot out of the xy plane; a place region "
+            "is an axis-aligned box and cannot be expressed in that root frame. State the goal "
+            "with an explicit command range in Python instead."
+        )
+
+    theta = 2.0 * math.atan2(qz, qw)          # root -> env, about z
+    c, s = math.cos(-theta), math.sin(-theta)  # inverse: env -> root
+    cx = c * region.x - s * region.y
+    cy = s * region.x + c * region.y
+
+    warnings: list[str] = []
+    if isinstance(region, Point):
+        return Point(cx, cy, region.z), warnings
+    if isinstance(region, Disc):
+        # A disc is invariant under rotation about its own axis; only the centre moves.
+        return Disc(cx, cy, region.z, region.r), warnings
+
+    # A rotated box is not axis-aligned, so take its axis-aligned envelope. Exact for the
+    # quarter-turns that actually occur (the extents just swap); a superset otherwise.
+    dx = abs(c) * region.dx + abs(s) * region.dy
+    dy = abs(s) * region.dx + abs(c) * region.dy
+    if min(abs(c), abs(s)) > 1e-6:
+        warnings.append(
+            f"base is rotated {math.degrees(theta):.1f} deg, which is not a quarter turn; the box "
+            f"place region is widened to its axis-aligned envelope "
+            f"({region.dx:.3f}, {region.dy:.3f}) -> ({dx:.3f}, {dy:.3f})"
+        )
+    return Box(cx, cy, region.z, dx, dy, region.dz), warnings
+
+
 @dataclass
 class Objective:
     """A parsed ``pick[...] place[...]`` statement."""
@@ -310,19 +355,28 @@ def parse_objective(text: str, pickable: list[str] | None = None, validate_reach
 def apply_objective(env_cfg, obj: Objective, spawn: Region | None = None) -> Any:
     """Write the parsed regions into the task config.
 
-    ``place`` sets the goal command ranges. ``spawn`` sets where the object is reset to.
+    ``place`` sets the goal command ranges. ``spawn`` sets where the object is reset to. Both are
+    written by a config in the environment frame, and each needs a different conversion to get
+    there.
 
-    Spawn needs a conversion: Isaac Lab's ``reset_root_state_uniform`` takes an offset from the
-    asset's default pose, while a config states an absolute position in the same frame as the
-    place region. Writing absolute coordinates straight into ``pose_range`` would offset them by
-    the object's spawn position a second time, putting the cube somewhere neither the author nor
-    the reward function expects.
+    Place needs a frame change: command ranges are in the robot root frame, which is rotated 90
+    degrees from the environment frame in every config here. See :func:`to_root_frame`.
+
+    Spawn needs an origin change: Isaac Lab's ``reset_root_state_uniform`` takes an offset from
+    the asset's default pose, not an absolute position. Writing absolute coordinates straight
+    into ``pose_range`` would offset them by the object's spawn position a second time, putting
+    the cube somewhere neither the author nor the reward function expects.
     """
     commands = getattr(env_cfg, "commands", None)
     cmd = getattr(commands, "object_pose", None) or getattr(commands, "ee_pose", None)
     if cmd is None:
         raise ObjectiveError("task has no object_pose or ee_pose command term to apply an objective to")
-    for key, value in obj.place.ranges().items():
+
+    robot = getattr(env_cfg.scene, "robot", None)
+    rot = getattr(getattr(robot, "init_state", None), "rot", None) or (0.0, 0.0, 0.0, 1.0)
+    place, warnings = to_root_frame(obj.place, rot)
+    obj.warnings.extend(warnings)
+    for key, value in place.ranges().items():
         setattr(cmd.ranges, key, value)
 
     if spawn is not None:
@@ -345,6 +399,25 @@ def apply_objective(env_cfg, obj: Objective, spawn: Region | None = None) -> Any
 def demo() -> None:
     """Self-check: the grammar, and the reach guard that is the point of it."""
     pickable = ["cube_red", "cube_blue"]
+
+    # Frame conversion: place is written env-frame, commands want the root frame.
+    q90 = (0.0, 0.0, 0.70710678, 0.70710678)          # 90 deg about z, what every config uses
+    r, w = to_root_frame(Point(0.0, 0.20, 0.10), q90)
+    assert not w and abs(r.x - 0.20) < 1e-6 and abs(r.y) < 1e-6 and abs(r.z - 0.10) < 1e-6, r
+    r, w = to_root_frame(Point(0.20, 0.0, 0.10), (0.0, 0.0, 0.0, 1.0))
+    assert abs(r.x - 0.20) < 1e-6 and abs(r.y) < 1e-6, r          # identity is a no-op
+    r, _ = to_root_frame(Disc(0.0, 0.20, 0.12, 0.06), q90)
+    assert abs(r.x - 0.20) < 1e-6 and abs(r.r - 0.06) < 1e-6, r   # radius survives rotation
+    r, w = to_root_frame(Box(0.0, 0.20, 0.12, 0.03, 0.08, 0.02), q90)
+    assert not w and abs(r.dx - 0.08) < 1e-6 and abs(r.dy - 0.03) < 1e-6, r   # extents swap
+    r, w = to_root_frame(Box(0.0, 0.2, 0.1, 0.04, 0.02, 0.01), (0.0, 0.0, 0.3827, 0.9239))
+    assert w and r.dx > 0.04, (r, w)                  # 45 deg: envelope, and it says so
+    try:
+        to_root_frame(Point(0.1, 0.0, 0.1), (0.7071, 0.0, 0.0, 0.7071))
+    except ObjectiveError:
+        pass
+    else:
+        raise AssertionError("a base tilted out of the xy plane should be rejected")
 
     o = parse_objective("pick[cube_red] place[0.20, 0.0, 0.12]", pickable)
     assert o.pick_names == ["cube_red"] and not o.pick_random

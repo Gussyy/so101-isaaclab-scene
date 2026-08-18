@@ -165,6 +165,20 @@ def resolve_task(cfg: dict[str, Any]) -> str:
     return lookup(TASKS, name, "task")
 
 
+def _default_prim_path(scene, name: str) -> str:
+    """Prim path for a scene entry the config did not give one for.
+
+    Overriding an entry the task already defines has to keep that entry's prim path. Isaac Lab
+    terms address bodies by regex on the prim leaf -- ``contrib.lift`` resets the cube with
+    ``SceneEntityCfg("object", body_names="Object")`` -- so deriving the path from the YAML key
+    renames the prim to ``object`` and the reset term dies with "Not all regular expressions are
+    matched", naming a term the config never mentions.
+    """
+    existing = getattr(scene, name, None)
+    path = getattr(existing, "prim_path", None)
+    return path if isinstance(path, str) else f"{{ENV_REGEX_NS}}/{name}"
+
+
 def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | None = None):
     """Construct the Isaac Lab env cfg described by ``cfg``.
 
@@ -194,11 +208,11 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
         env_cfg.scene.robot = lookup(ROBOTS, robot["type"], "robot")(robot)
 
     for name, spec in (scene_spec.get("objects") or {}).items():
-        spec = {**spec, "prim_path": spec.get("prim_path", f"{{ENV_REGEX_NS}}/{name}")}
+        spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}
         setattr(env_cfg.scene, name, lookup(OBJECTS, spec["type"], "object")(spec))
 
     for name, spec in (scene_spec.get("cameras") or {}).items():
-        spec = {**spec, "prim_path": spec.get("prim_path", f"{{ENV_REGEX_NS}}/{name}")}
+        spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}
         setattr(env_cfg.scene, name, lookup(CAMERAS, spec["type"], "camera")(spec))
 
     cam_names = list(scene_spec.get("cameras") or {})

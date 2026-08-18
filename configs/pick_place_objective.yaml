@@ -14,9 +14,20 @@
 #  For a TOP-DOWN grasp the gripper must point down, which holds for only 28% of
 #  configurations and shrinks the usable radius to about 0.33 m.
 #
+#  ALL COORDINATES ARE IN THE ENVIRONMENT FRAME -- the same frame as scene.robot.pos
+#  and a camera's pos/look_at. `place` is converted into the robot root frame for you
+#  (simbridge.objective.to_root_frame); before that existed, place[0.20, 0.0, 0.10]
+#  silently landed at (0.000, 0.200, 0.100), 0.30 m from the cube.
+#
 #  Practical areas for this task:
 #    spawn the cube on the table   x 0.15..0.26   y -0.10..0.10   z = half the cube
-#    place target in the air       x 0.14..0.26   y -0.10..0.10   z 0.05..0.20
+#    place target in the air       x -0.10..0.10  y  0.15..0.25   z 0.06..0.16
+#
+#  Those two boxes sit 90 degrees apart around the base. That is inherited: the goal
+#  ranges come from upstream contrib.lift (written for a Franka) and this arm's base is
+#  rotated 90 deg, so the shipped checkpoint learned to carry the cube round to the side.
+#  It reaches 92% doing it. Goals in front of the arm are equally legal and equally
+#  reachable -- they just need a retrain, since the checkpoint never saw them.
 #
 #  Anything mostly outside the envelope is REJECTED at parse time, before Isaac Sim
 #  starts. A goal the arm cannot reach trains to a flat reward and looks like a broken
@@ -46,12 +57,12 @@ objective:
   #   place[box(x, y, z, dx, dy, dz)]
   #
   # Examples that parse:
-  #   "pick[object] place[0.20, 0.0, 0.12]"
-  #   "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
-  #   "pick:[object]place:[0.20,0.0,0.12]"
+  #   "pick[object] place[0.0, 0.20, 0.12]"
+  #   "pick[random] place[random(0.0, 0.20, 0.12, r0.06)]"
+  #   "pick:[object]place:[0.0,0.20,0.12]"
   # Example that is REJECTED (12% reachable -- a 1 m radius on a 0.35 m arm):
   #   "pick[random] place[random(0, 0, 0, r1)]"
-  sequence: "pick[random] place[random(0.20, 0.0, 0.12, r0.06)]"
+  sequence: "pick[random] place[random(0.0, 0.20, 0.12, r0.06)]"
 
 scene:
   num_envs: 64
