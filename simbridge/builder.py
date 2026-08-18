@@ -21,9 +21,22 @@ import yaml
 from simbridge import scene  # noqa: F401  (registers builtins)
 from simbridge.registry import CAMERAS, OBJECTS, ROBOTS, TASKS, lookup
 
-_TOP_LEVEL = {"task", "scene", "sim", "control", "meta"}
+_TOP_LEVEL = {"task", "scene", "sim", "control", "render", "meta"}
 _SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras"}
 _SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device"}
+
+# Named RTX settings, plus `carb_settings` for anything not surfaced here.
+# DLSS upscales from a lower internal resolution; DLSS-G (`frame_generation`) interpolates
+# extra frames. Frame generation is for display smoothness -- interpolated frames are not
+# rendered from scene state, so they must not be used as policy observations.
+_RENDER_KEYS = {
+    "antialiasing", "dlss_mode", "frame_generation", "dl_denoiser",
+    "reflections", "global_illumination", "translucency", "direct_lighting",
+    "shadows", "ambient_occlusion", "samples_per_pixel", "max_bounces",
+    "carb_settings",
+}
+_AA_MODES = {"Off", "FXAA", "DLSS", "TAA", "DLAA"}
+_DLSS_MODES = {0: "performance", 1: "balanced", 2: "quality", 3: "auto"}
 
 
 def _reject_unknown(d: dict[str, Any], allowed: set[str], where: str) -> None:
@@ -44,7 +57,90 @@ def load_config(path: str | Path) -> dict[str, Any]:
         raise ValueError(f"{path}: 'task' is required (registered: {sorted(TASKS)})")
     _reject_unknown(cfg.get("scene") or {}, _SCENE_KEYS, "scene")
     _reject_unknown(cfg.get("sim") or {}, _SIM_KEYS, "sim")
+    _reject_unknown(cfg.get("render") or {}, _RENDER_KEYS, "render")
+
+    render = cfg.get("render") or {}
+    # YAML 1.1 parses bare Off/On/Yes/No as booleans, so `antialiasing: Off` arrives as False.
+    # Normalising is friendlier than making everyone remember to quote it.
+    if isinstance(render.get("antialiasing"), bool):
+        render["antialiasing"] = "Off" if render["antialiasing"] is False else "DLAA"
+    aa = render.get("antialiasing")
+    if isinstance(aa, str):
+        canon = {m.lower(): m for m in _AA_MODES}
+        aa = canon.get(aa.lower(), aa)
+        render["antialiasing"] = aa
+    if aa is not None and aa not in _AA_MODES:
+        raise ValueError(f"render.antialiasing must be one of {sorted(_AA_MODES)}, got {aa!r}")
+    dm = render.get("dlss_mode")
+    if dm is not None and dm not in _DLSS_MODES:
+        raise ValueError(
+            f"render.dlss_mode must be one of {sorted(_DLSS_MODES)} "
+            f"({', '.join(f'{k}={v}' for k, v in _DLSS_MODES.items())}), got {dm!r}"
+        )
+    if dm is not None and aa not in (None, "DLSS"):
+        raise ValueError(f"render.dlss_mode is set but antialiasing is {aa!r}; set antialiasing: DLSS")
     return cfg
+
+
+def apply_render_cfg(env_cfg, render: dict[str, Any], camera_names: list[str]):
+    """Attach RTX render settings to every camera declared in the config.
+
+    These settings live on each camera's ``renderer_cfg``, not on ``SimulationCfg`` -- there is
+    no ``sim.renderer`` field, so assigning one creates a stray attribute that nothing reads and
+    the settings silently do nothing. (Which is exactly what the first version of this function
+    did, and the DLSS warning in the log is what caught it.)
+
+    Applying to no cameras is a no-op, and reported as such by the caller rather than passing
+    quietly: a ``render`` block in a config with no cameras means the author expected an effect
+    that cannot happen.
+
+    Two caveats worth knowing before enabling anything here:
+
+    * DLSS renders below the requested resolution and upscales, but Isaac Sim will not go under
+      300 px internally. At a 128 px training camera it upsamples the input instead, costing
+      time and changing pixels for no benefit. Leave it off for training cameras.
+    * Frame generation (DLSS-G) interpolates frames that were never rendered from scene state.
+      Fine for a viewport, wrong as a policy observation, and it does not increase the rate at
+      which the simulator produces distinct observations.
+    """
+    if not render:
+        return env_cfg
+
+    from isaaclab_physx.renderers.isaac_rtx_renderer_cfg import (
+        IsaacRtxRendererCfg,
+        IsaacRtxRendererGlobalSettingsCfg,
+    )
+
+    field_map = {
+        "antialiasing": "antialiasing_mode",
+        "dlss_mode": "dlss_mode",
+        "frame_generation": "enable_dlssg",
+        "dl_denoiser": "enable_dl_denoiser",
+        "reflections": "enable_reflections",
+        "global_illumination": "enable_global_illumination",
+        "translucency": "enable_translucency",
+        "direct_lighting": "enable_direct_lighting",
+        "shadows": "enable_shadows",
+        "ambient_occlusion": "enable_ambient_occlusion",
+        "samples_per_pixel": "samples_per_pixel",
+        "max_bounces": "max_bounces",
+        "carb_settings": "carb_settings",
+    }
+    kwargs = {field_map[k]: v for k, v in render.items() if k in field_map and v is not None}
+    if not kwargs:
+        return env_cfg
+
+    globals_cfg = IsaacRtxRendererGlobalSettingsCfg(**kwargs)
+    for name in camera_names:
+        cam = getattr(env_cfg.scene, name, None)
+        if cam is None:
+            continue
+        existing = getattr(cam, "renderer_cfg", None)
+        if isinstance(existing, IsaacRtxRendererCfg):
+            existing.global_settings = globals_cfg
+        else:
+            cam.renderer_cfg = IsaacRtxRendererCfg(global_settings=globals_cfg)
+    return env_cfg
 
 
 def resolve_task(cfg: dict[str, Any]) -> str:
@@ -56,8 +152,9 @@ def resolve_task(cfg: dict[str, Any]) -> str:
 def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | None = None):
     """Construct the Isaac Lab env cfg described by ``cfg``.
 
-    Import is deferred: this module is importable (and testable) without booting Isaac Sim, so a
-    config can be validated in a fraction of a second instead of after a two-minute Kit startup.
+    The Isaac Lab import is deferred so this module stays importable without booting Isaac Sim;
+    a config can then be validated in a fraction of a second instead of after a two-minute Kit
+    startup.
     """
     from isaaclab_tasks.utils import parse_env_cfg
 
@@ -88,12 +185,22 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
         spec = {**spec, "prim_path": spec.get("prim_path", f"{{ENV_REGEX_NS}}/{name}")}
         setattr(env_cfg.scene, name, lookup(CAMERAS, spec["type"], "camera")(spec))
 
+    cam_names = list(scene_spec.get("cameras") or {})
+    render_spec = cfg.get("render") or {}
+    if render_spec and not cam_names:
+        raise ValueError(
+            "config has a 'render' block but declares no cameras; RTX settings attach to "
+            "cameras, so nothing would apply"
+        )
+    apply_render_cfg(env_cfg, render_spec, cam_names)
+
     return env_cfg
 
 
 def describe(cfg: dict[str, Any]) -> str:
     """One-screen summary, for confirming a config says what you meant before a long run."""
     s, sim, ctl = cfg.get("scene") or {}, cfg.get("sim") or {}, cfg.get("control") or {}
+    rnd = cfg.get("render") or {}
     lines = [
         f"task      : {cfg['task']}  -> {TASKS.get(cfg['task'] if isinstance(cfg['task'], str) else '', '?')}",
         f"envs      : {s.get('num_envs', 64)}  spacing={s.get('env_spacing', '-')}",
@@ -104,5 +211,7 @@ def describe(cfg: dict[str, Any]) -> str:
         f"episode_s={sim.get('episode_length_s','-')}",
         f"control   : source={ctl.get('source','-')} transport={ctl.get('transport','inprocess')} "
         f"horizon={ctl.get('action_horizon',1)}",
+        f"render    : aa={rnd.get('antialiasing','default')} "
+        f"dlss_mode={rnd.get('dlss_mode','-')} framegen={rnd.get('frame_generation','-')}",
     ]
     return "\n".join(lines)

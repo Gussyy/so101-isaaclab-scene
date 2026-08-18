@@ -51,6 +51,21 @@ scene:
       focal_length: 12.0
       clipping_range: [0.01, 1.5]
 
+render:
+  # Anti-aliasing: Off | FXAA | TAA | DLSS | DLAA
+  # DLSS renders below the requested resolution and upscales, but Isaac Sim will not go under
+  # 300 px internally -- at a 128 px training camera it upsamples the input instead, costing
+  # time and changing pixels for nothing. Keep it Off for training; use DLSS/DLAA for viewing.
+  antialiasing: "Off"
+  # dlss_mode: 2            # 0 performance, 1 balanced, 2 quality, 3 auto (needs antialiasing: DLSS)
+  # frame_generation: true  # DLSS-G. Interpolated frames are not rendered from scene state,
+  #                         # so they are fine for a viewport and wrong as policy observations.
+  # Cheaper training frames: drop the effects a cube-on-a-table scene does not need.
+  reflections: false
+  global_illumination: false
+  translucency: false
+  ambient_occlusion: false
+
 sim:
   episode_length_s: 5.0
   physics: isaacsim_physx   # newton_mjwarp works but pays ~900 CPU-s of CoACD at scene build
