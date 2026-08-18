@@ -88,6 +88,59 @@ Isaac Lab's SO-101 *stack* task (`njmax=300, nconmax=200`, elliptic cone, `impra
 rather than the reach preset â€” grasping is contact-rich and reach's `njmax=100, nconmax=20`
 drops contacts.
 
+
+## Reward shaping: the failure mode that cost two runs
+
+Both failed runs had the same shape of bug, and it is worth stating as a rule because it is
+easy to reintroduce:
+
+> A dense shaping term only helps if it has gradient **at the distances the task actually
+> starts from**. Its width must span the distance the thing has to travel — it is not a
+> function of the robot's size.
+
+`1 - tanh(d/std)` saturates fast. Scaling `std` down "because the arm is 3x smaller" produced
+a reward that was numerically dense but functionally constant:
+
+| term | `std` used | distance at start | reward | outcome |
+|---|---|---|---|---|
+| `reaching_object` | 0.04 | 0.177 m | 0.0003 | never approached the cube; policy std collapsed 1.00 -> 0.03 |
+| `object_goal_tracking` | 0.12 | 0.335 m | 0.007 | learned to lift and hold; success 0.13 % |
+| `object_goal_tracking` | **0.30** | 0.335 m | **0.194** | **success 89 %** |
+
+That middle row is the interesting one. A dense reward flat at 0.007 across the whole working
+range is *functionally sparse* — but without any of the machinery that makes sparse rewards
+learnable. It is strictly worse than either honest option.
+
+### Why that matters, from the literature
+
+[Hindsight Experience Replay](https://arxiv.org/abs/1707.01495) (Andrychowicz et al., 2017)
+reports two results that frame this directly:
+
+- **Their dense shaping failed outright.** On the shaped reward `|g - s_object|^2`, Figure 5
+  reads "Both algorithms fail on all tasks"; they also tried linear/quadratic terms pulling
+  the gripper toward the object and none "led to successful training". Sparse binary rewards
+  plus HER is what worked.
+- **Pick-and-place needed an exploration prior.** They recorded one state with the box grasped
+  and "start half of the training episodes from this state", because random exploration
+  essentially never discovers a grasp. Isaac Lab ships the same idea as the
+  `start_grasped_then_assembled` reset strategy in its NIST/factory tasks.
+
+Those look like they contradict the result here, and the reconciliation is the point: HER is an
+*off-policy* method (DDPG/SAC), unavailable to rsl_rl's on-policy PPO. What substitutes for it
+is 8192 parallel environments — enough exploration volume that a genuinely dense reward finds
+the grasp without hindsight relabelling. The failed runs did not have a dense reward; they had
+a flat one.
+
+If a harder variant of this task does stall, the demonstration-state trick is the documented
+next lever, not more shaping tweaks.
+
+### This task is known-hard upstream
+
+Isaac Lab's own Franka lift carries open reports of the identical "reaches but will not lift"
+symptom: [#204](https://github.com/isaac-sim/IsaacLab/issues/204),
+[#1697](https://github.com/isaac-sim/IsaacLab/discussions/1697), one at 45 M steps with zero
+successes. Treat any inherited constant that carries a magnitude as suspect on a 0.30 m arm.
+
 ## The robot
 
 Verified by spawning it, not read off the USD:
