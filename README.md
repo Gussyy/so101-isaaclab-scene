@@ -151,17 +151,48 @@ Regions are checked against the arm's measured envelope before Isaac Sim starts.
 reachable is rejected; 20–90% warns with the percentage. `place[random(0,0,0,r1)]` is a 1 m
 radius on an arm that reaches 0.35 m, and fails with `only 12% reachable`.
 
-Measured working area (`scripts/measure_workspace.py`, 1500 sampled configurations):
+Measured working area (`scripts/measure_workspace.py`, 2500 sampled configurations):
 
 ```
 radial from base   0.02 .. 0.35 m      (0.33 m for a top-down grasp)
 height above table 0.00 .. 0.45 m
 ```
 
+See it rather than read it — [docs/workspace.png](docs/workspace.png), and the task's own regions
+drawn to scale inside it:
+
+![reachable envelope, side and top view](docs/workspace.png)
+
 Coordinates are in the environment frame — the same frame as `scene.robot.pos` and a camera's
 `look_at`. `place` is converted into the robot root frame for you.
 
 Full reference: [docs/OBJECTIVES.md](docs/OBJECTIVES.md).
+
+## How far it reaches
+
+Every joint driven to both of its limits, with the reach boundary drawn around the base:
+
+![each joint swept through its full range inside the 35 cm reach boundary](docs/reach_sweep.gif)
+
+```bash
+python scripts/sweep_limits.py --config configs/variants/reach_sweep.yaml --out docs/reach_sweep.mp4
+```
+
+Joint positions are written straight to the simulation, bypassing the action space, so this is
+what the *arm* can do rather than what a policy commands. 10 of the 12 extremes are hit within
+0.02 rad. The two that are not are worth knowing about:
+
+| joint | commanded | reached | |
+|---|---|---|---|
+| `elbow_flex` | +1.690 | **+1.37** | blocked — mostly by the table, partly by self-collision |
+| `shoulder_lift` | +1.745 | **+1.96** | settles *past* its limit; PhysX is not enforcing it hard |
+
+Turning off self-collision recovers only a quarter of the elbow shortfall, so most of it is the
+arm folding into the table. In free space every joint reaches its full range.
+
+The sphere is a **maximum**, not the reachable set. The real envelope is a lopsided shell with a
+hole around the base, and only 27% of it can be approached from above — that's what
+[docs/workspace.png](docs/workspace.png) draws. Numbers: [docs/joint_range.txt](docs/joint_range.txt).
 
 ## Objects
 
@@ -385,6 +416,7 @@ Three gotchas:
 | `dump_camera_views.py` | save one frame per camera + pixel stats |
 | `measure_workspace.py` | measure the arm's reachable envelope and jaw opening |
 | `measure_objects.py` | measure every named prop and say which the jaw can close on |
+| `sweep_limits.py` | drive every joint to its limits and record it, reach boundary drawn |
 | `capture_clip.py` | render one config to a video clip, for documentation |
 | `collect_dataset.py` | record a LeRobot dataset from any driver |
 | `lerobot_server.py` | LeRobot teleop or policy, over ZeroMQ |

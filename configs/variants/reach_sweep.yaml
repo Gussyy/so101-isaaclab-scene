@@ -1,0 +1,62 @@
+# Every joint driven through its full range, with the reach limit drawn around the arm.
+#
+#   python scripts/sweep_limits.py --config configs/variants/reach_sweep.yaml \
+#       --out docs/reach_sweep.mp4
+#
+# sweep_limits.py draws the reach boundary as an outline over the render (--reach, default
+# 0.354 m). It is a MAXIMUM, not the reachable set: 0.354 m is the 99th-percentile reach measured
+# by scripts/measure_workspace.py over 2500 random joint configurations. The real envelope is a
+# lopsided shell with a hole around the base, and only 27% of it can be approached from above --
+# docs/workspace.png draws that properly.
+#
+# Drawn rather than spawned: a translucent sphere prim renders solid on the RTX path and hides
+# the robot it is meant to describe.
+#
+# control.source is irrelevant here: sweep_limits.py writes joint positions straight to the
+# simulation, bypassing the action space, because the question is what the arm can do rather
+# than what a policy would command.
+
+meta:
+  name: variant-reach-sweep
+  notes: Visualisation only. Nothing is being trained or evaluated.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  spawn: "box(0.20, 0.0, 0.0125, 0.0, 0.0, 0.0)"
+  sequence: "pick[object] place[0.0, 0.20, 0.08]"
+
+scene:
+  num_envs: 1
+  env_spacing: 3.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+  objects:
+    object:
+      type: cuboid
+      size: [0.025, 0.025, 0.025]
+      color: [0.90, 0.25, 0.15]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.95, 0.80, 0.55]
+      look_at: [0.0, 0.0, 0.14]
+      focal_length: 20.0
+
+sim:
+  episode_length_s: 60.0
+
+control:
+  source: zero
+  action_horizon: 1

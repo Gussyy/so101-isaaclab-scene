@@ -42,3 +42,30 @@ Reading this
 
 Reproduce: the table above comes from stepping configs/variants/goal_centre.yaml under the
 trained checkpoint and recording per-joint min/max of joint_pos against joint_pos_limits.
+
+Driving each joint to its limits directly (scripts/sweep_limits.py)
+------------------------------------------------------------------
+Joint positions written straight to the simulation, bypassing the action space, so this is what
+the arm can do rather than what a policy commands. 10 of 12 extremes are hit within 0.02 rad.
+The two that are not:
+
+  elbow_flex     +1.690 commanded -> +1.37 reached   blocked short of it
+  shoulder_lift  +1.745 commanded -> +1.96 reached   settles PAST the limit
+
+elbow_flex is blocked by the scene, not by the joint. Re-running with
+articulation_props.enabled_self_collisions = False recovers only about a quarter of the shortfall
+(+1.41 -> +1.48), so most of the remainder is the arm folding down into the table. In free space
+-- measure_workspace.py, no table, gravity off -- the full range is reached.
+
+shoulder_lift overshoots its own limit by ~0.2 rad and stays there, so PhysX is not enforcing
+this joint limit hard against the drive. Worth knowing before trusting joint_pos to stay inside
+joint_pos_limits.
+
+Both were originally reported as "stopped short", which is wrong for the second one. The script
+now reports direction, because a joint that overshoots its limit and one that is blocked by a
+table are different problems.
+
+One measurement trap, recorded because it cost a debugging round: writing joint state with
+write_joint_position_to_sim alone leaves the implicit PD actuator holding its previous target,
+which drags every joint about 0.1 rad back and reads as a limit that is not there. The target has
+to be written too.

@@ -27,6 +27,8 @@ from isaaclab.app import AppLauncher
 
 parser = argparse.ArgumentParser(description="Measure the SO-ARM101 workspace.")
 parser.add_argument("--samples", type=int, default=3000, help="joint configurations to sample")
+parser.add_argument("--plot", default=None, metavar="PNG",
+                    help="also draw the envelope, e.g. docs/workspace.png")
 parser.add_argument("--batch", type=int, default=500, help="configurations evaluated per sim step")
 parser.add_argument("--down-cos", type=float, default=0.7,
                     help="min alignment of the gripper axis with -Z to count as top-down")
@@ -180,6 +182,70 @@ def main() -> None:
         print("       badly optimistic one: it ignores the arm's own weight, gearing losses and")
         print("       all dynamics. The real SO-101 is quoted nearer 200-300 g.")
     print("=" * 74 + "\n")
+
+    if args_cli.plot:
+        draw(pos, radial, z, downs, full, Path(args_cli.plot))
+
+
+def draw(pos, radial, z, downs, full, out) -> None:
+    """Draw the envelope: a side view and a top view of where the gripper actually got to.
+
+    A table of percentiles does not answer "how far can it reach" the way a picture does, and the
+    picture is also what makes the task's own regions look small against it -- which they are,
+    deliberately.
+    """
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, Rectangle
+
+    sel = downs >= args_cli.down_cos
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5.6), facecolor="#0d1117")
+    for ax in (ax1, ax2):
+        ax.set_facecolor("#0d1117")
+        for spine in ax.spines.values():
+            spine.set_color("#30363d")
+        ax.tick_params(colors="#8b949e")
+        ax.xaxis.label.set_color("#c9d1d9")
+        ax.yaxis.label.set_color("#c9d1d9")
+        ax.grid(color="#21262d", linewidth=0.6)
+
+    ax1.scatter(radial[~sel], z[~sel], s=1.5, c="#30506e", alpha=0.35, label="any orientation")
+    ax1.scatter(radial[sel], z[sel], s=1.5, c="#56b6ff", alpha=0.55, label="gripper pointing down")
+    ax1.axhline(0.0, color="#8b949e", lw=1.0)
+    ax1.add_patch(Rectangle((0.15, 0.0), 0.11, 0.03, fill=False, ec="#f8b74d", lw=1.6))
+    ax1.text(0.155, 0.045, "cube spawns here", color="#f8b74d", fontsize=9)
+    ax1.add_patch(Rectangle((0.15, 0.06), 0.10, 0.10, fill=False, ec="#56d364", lw=1.6))
+    ax1.text(0.155, 0.175, "goal region", color="#56d364", fontsize=9)
+    ax1.set_xlabel("radial distance from base (m)")
+    ax1.set_ylabel("height above table (m)")
+    ax1.set_title(f"side view - {len(pos)} sampled joint configurations", color="#c9d1d9", fontsize=11)
+    leg = ax1.legend(loc="upper right", facecolor="#0d1117", edgecolor="#30363d", fontsize=9)
+    for t in leg.get_texts():
+        t.set_color("#c9d1d9")
+
+    ax2.scatter(pos[:, 0], pos[:, 1], s=1.5, c="#30506e", alpha=0.3)
+    ax2.scatter(pos[sel, 0], pos[sel, 1], s=1.5, c="#56b6ff", alpha=0.5)
+    ax2.add_patch(Circle((0, 0), full["radial_max"], fill=False, ec="#f85149", lw=1.4))
+    ax2.add_patch(Circle((0, 0), 0.332, fill=False, ec="#f85149", ls="--", lw=1.4))
+    ax2.text(0.0, full["radial_max"] + 0.012, f"{full['radial_max']:.2f} m (99th pct)",
+             color="#f85149", fontsize=9, ha="center")
+    ax2.text(0.0, -0.36, "0.33 m for a top-down grasp", color="#f85149", fontsize=9, ha="center")
+    ax2.plot(0.20, 0.0, marker="s", ms=7, color="#f8b74d")
+    ax2.text(0.215, 0.005, "cube", color="#f8b74d", fontsize=9)
+    ax2.plot(0.0, 0.20, marker="*", ms=12, color="#56d364")
+    ax2.text(0.012, 0.215, "goal", color="#56d364", fontsize=9)
+    ax2.set_aspect("equal")
+    ax2.set_xlabel("x (m, environment frame)")
+    ax2.set_ylabel("y (m, environment frame)")
+    ax2.set_title("top view - the arm reaches over +x, goals sit at +y", color="#c9d1d9", fontsize=11)
+
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out, dpi=130, facecolor="#0d1117")
+    print(f"wrote {out}")
 
 
 if __name__ == "__main__":
