@@ -50,21 +50,48 @@ class RslRlCheckpointSource(ActionSource):
         path = Path(checkpoint)
         if not path.is_file():
             raise FileNotFoundError(f"checkpoint not found: {path}")
+
+        # rsl_rl writes two things: model_<n>.pt holds raw state_dicts, and exported/policy.pt is
+        # a TorchScript module that can simply be called. Prefer the exported one -- rebuilding
+        # the actor from a state_dict means reconstructing the exact network the run used, and
+        # getting that subtly wrong produces a policy that loads cleanly and acts badly.
+        exported = path.parent / "exported" / "policy.pt"
+        if path.name.startswith("model_") and exported.is_file():
+            print(f"[rl_checkpoint] using TorchScript export: {exported}")
+            path = exported
+
+        try:
+            loaded = torch.jit.load(str(path), map_location=device)
+            loaded.eval()
+            self._actor = loaded
+            self._payload = None
+            return
+        except Exception:
+            pass  # not TorchScript; fall through to the checkpoint dict
+
         payload = torch.load(path, map_location=device, weights_only=False)
         self._payload = payload
         self._actor = self._extract_actor(payload)
 
     @staticmethod
     def _extract_actor(payload):
-        """rsl_rl has stored the actor under several keys across versions; try them in order
-        and fail with what was actually present rather than a KeyError on one guess."""
-        for key in ("actor", "model_state_dict", "model", "policy"):
-            if key in payload:
-                return payload[key]
-        raise KeyError(
-            f"no actor found in checkpoint; top-level keys were {sorted(payload)[:12]}. "
-            "Load it manually and pass the module if this is a new rsl_rl layout."
-        )
+        """Find something callable in a raw checkpoint.
+
+        rsl_rl has moved this key across versions, so try the known names and fail with what was
+        actually present. A bare ``actor_state_dict`` is weights only -- there is no network to
+        run -- so that case points at the TorchScript export instead of guessing an architecture.
+        """
+        for key in ("actor", "model", "policy"):
+            obj = payload.get(key)
+            if callable(obj):
+                return obj
+        if "actor_state_dict" in payload:
+            raise KeyError(
+                "this checkpoint holds state_dicts only (actor_state_dict), not a runnable module. "
+                "Point at exported/policy.pt in the same run directory, which rsl_rl writes as "
+                "TorchScript, or rebuild the runner with rsl_rl and pass its policy."
+            )
+        raise KeyError(f"no actor found in checkpoint; top-level keys were {sorted(payload)[:12]}")
 
     def _predict_chunk(self, obs: ObsPacket) -> np.ndarray:
         if self.obs_key not in obs.state:

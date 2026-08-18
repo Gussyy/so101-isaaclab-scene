@@ -1,0 +1,71 @@
+# Dataset collection and LeRobot interop.
+#
+#   record demonstrations from the trained policy:
+#     python scripts/collect_dataset.py --config configs/pick_place_lerobot.yaml --episodes 200
+#
+#   drive the sim from LeRobot instead (separate venv, see docs/LEROBOT.md):
+#     python scripts/lerobot_server.py mock          # or: teleop --port COM5
+#     python scripts/run.py --config configs/pick_place_lerobot.yaml --set control.source=zmq
+meta:
+  name: so101-lerobot
+  notes: >
+    128 envs with two cameras measured 6,367 MiB and 6,883 env-steps/s. 256 envs fits (9,113 MiB)
+    but leaves no headroom for the dataset writer.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  # Reachable working area, measured by scripts/measure_workspace.py:
+  #   radial 0.02..0.35 m from the base, height 0.00..0.45 m
+  #   a top-down grasp needs radial <= 0.33 m
+  spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
+  # Matches the distribution the checkpoint was trained on: x 0.15..0.25, y -0.10..0.10,
+  # z 0.06..0.16. Narrowing it here would evaluate the expert off-distribution and the
+  # success rate would collapse -- a 2% run is what that looks like.
+  sequence: "pick[random] place[box(0.20, 0.0, 0.11, 0.05, 0.10, 0.05)]"
+
+scene:
+  num_envs: 128
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+  cameras:
+    # LeRobot policies usually take a scene view plus a wrist view.
+    scene_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/SceneCam"
+      resolution: [128, 128]
+      pos: [0.55, 0.0, 0.35]
+      rot: [0.0, 0.259, 0.0, 0.966]
+      focal_length: 18.0
+    wrist_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/Robot/gripper/WristCam"
+      resolution: [128, 128]
+      pos: [0.0, -0.04, 0.02]
+      rot: [0.5, -0.5, 0.5, 0.5]
+      focal_length: 12.0
+
+sim:
+  episode_length_s: 5.0
+
+render:
+  # Off for training frames: DLSS will not render below 300 px internally, so at 128 px it
+  # upsamples the input and changes pixels for no benefit.
+  antialiasing: "Off"
+  reflections: false
+  global_illumination: false
+
+control:
+  source: rl_checkpoint
+  action_horizon: 1
+  checkpoint: logs/rsl_rl/pick_place_so101/2026-08-18_17-22-09/exported/policy.pt

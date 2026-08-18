@@ -11,3 +11,4 @@ outputs/
 *.err
 *.log
 docs/camera_views/
+datasets/

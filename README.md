@@ -125,6 +125,39 @@ height above table 0.00 .. 0.45 m
 
 Full reference: [docs/OBJECTIVES.md](docs/OBJECTIVES.md).
 
+## LeRobot
+
+[LeRobot](https://github.com/huggingface/lerobot) can teleoperate this environment, collect
+datasets from it, or drive it with a trained policy. It runs in its own venv and talks over the
+same ZeroMQ socket everything else uses.
+
+```bash
+# LeRobot venv
+python scripts/lerobot_server.py mock              # or: teleop --port COM5
+python scripts/lerobot_server.py policy --path outputs/train/act_so101/.../pretrained_model
+
+# environment venv
+python scripts/run.py --config configs/pick_place_lerobot.yaml --set control.source=zmq
+```
+
+Record a dataset `lerobot-train` reads directly:
+
+```bash
+python scripts/collect_dataset.py --config configs/pick_place_lerobot.yaml --episodes 200     --out datasets/so101_pickplace
+```
+
+Only successful episodes are kept. LeRobot's `SOFollower` uses the same joint order as this
+articulation; units differ (arm −100..100, gripper 0..100) and are converted.
+
+Full guide: [docs/LEROBOT.md](docs/LEROBOT.md).
+
+## Tests
+
+```bash
+python scripts/run_all_tests.py          # fast tier, no simulator, ~20s
+python scripts/run_all_tests.py --sim    # plus scene load, cameras, ZMQ-driven run
+```
+
 ## Keyboard teleop
 
 Two ways, depending on where you want focus.
@@ -265,6 +298,9 @@ Two gotchas:
 | `measure_ee.py` | measure the grasp point between the jaws |
 | `dump_camera_views.py` | save one frame per camera + pixel stats |
 | `measure_workspace.py` | measure the arm's reachable envelope and graspability |
+| `collect_dataset.py` | record a LeRobot dataset from any driver |
+| `lerobot_server.py` | LeRobot teleop or policy, over ZeroMQ |
+| `run_all_tests.py` | the whole test suite |
 | `run.py` | run a YAML scene with any driver |
 | `policy_server.py` | serve actions over ZeroMQ |
 | `teleop_server.py` | keyboard teleop over ZeroMQ, no simulator needed |
