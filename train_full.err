@@ -1,5 +1,0 @@
-W0818 17:22:04.451000 12220 site-packages\torch\distributed\elastic\multiprocessing\redirects.py:29] NOTE: Redirects are currently not supported in Windows or MacOs.
-[ISAACLAB] AppLauncher initialization complete
-[ISAACLAB] Kit version: 110.1.2+production.326809.f9bf0dda.gl
-[ISAACLAB] Kit kernel:  210.1.11+release.13746.80f6dc72.gl
-[ISAACLAB] Kit hash:    f9bf0dda
