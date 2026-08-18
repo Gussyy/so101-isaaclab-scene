@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import os
 import subprocess
+import textwrap
 import sys
 import time
 from pathlib import Path
@@ -114,6 +115,43 @@ print(f"{len(ok)} accepted, {len(bad)} rejected")
 """
     code, out = sh([PY, "-c", src], timeout=120)
     record("grammar: 4 valid accepted, 6 invalid rejected", code == 0, out.strip().splitlines()[-1] if out else "")
+
+
+def test_physics_selection() -> None:
+    """A named backend must actually take, and an unknown one must be refused.
+
+    Both halves matter. ``parse_env_cfg`` resolves every ``PresetCfg`` to its ``.default``, and
+    ``SimulationContext`` silently collapses an unresolved one the same way -- so a config asking
+    for Newton ran on PhysX and said nothing about it. ``resolve_presets`` then skips the
+    validation Hydra performs, so a typo'd name falls back to default just as quietly.
+    """
+    print("\nphysics backend selection")
+    src = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, '.')
+        import so101_scene  # noqa: F401
+        from simbridge.builder import load_env_cfg
+
+        for name, expect in (("newton_mjwarp", "NewtonCfg"), ("isaacsim_physx", "PhysxCfg")):
+            got = type(load_env_cfg("SO101-PickPlace-v0", "cuda:0", 2, name).sim.physics).__name__
+            if got != expect:
+                print(f"WRONG {name} -> {got}, expected {expect}")
+                raise SystemExit(1)
+        print("SELECTED")
+
+        try:
+            load_env_cfg("SO101-PickPlace-v0", "cuda:0", 2, "definitely_not_a_backend")
+        except ValueError as exc:
+            print("REJECTED" if "definitely_not_a_backend" in str(exc) else f"BAD MESSAGE: {exc}")
+        else:
+            print("NOT REJECTED")
+        """
+    )
+    code, out = sh([PY, "-c", src], timeout=300)
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    record("a named backend resolves to its own class", code == 0 and "SELECTED" in out, last)
+    record("an unknown backend name is refused", "REJECTED" in out and "NOT REJECTED" not in out, last)
 
 
 def test_registry() -> None:
@@ -274,6 +312,7 @@ def main() -> None:
     test_self_checks()
     test_configs()
     test_objective_grammar()
+    test_physics_selection()
     test_registry()
     test_scripts_help()
     test_zmq_roundtrip()

@@ -219,6 +219,76 @@ def _default_prim_path(scene, name: str) -> str:
     return path if isinstance(path, str) else f"{{ENV_REGEX_NS}}/{name}"
 
 
+def physics_options(preset) -> dict[str, Any]:
+    """Backend names a task's physics preset offers, mapped to their configs.
+
+    A task declares its backends as class attributes on a ``PresetCfg`` -- see
+    ``so101_scene.pick_place_env_cfg.PickPlacePhysicsCfg``. Reading them back rather than
+    hardcoding a list keeps the error message true when a task adds one.
+    """
+    if preset is None or not any(c.__name__ == "PresetCfg" for c in type(preset).__mro__):
+        return {}
+    # Read the instance, not the class. ``@configclass`` rewrites the class attributes to strings
+    # (``getattr(PickPlacePhysicsCfg, "newton_mjwarp")`` is ``str``), and only the instance holds
+    # the real cfg objects.
+    out = {}
+    for name in preset.__dataclass_fields__:
+        if name.startswith("_") or name == "default":
+            continue
+        value = getattr(preset, name, None)
+        if value is not None and hasattr(value, "__dataclass_fields__"):
+            out[name] = value
+    return out
+
+
+def load_env_cfg(gym_id: str, device: str, num_envs: int, physics: str | None):
+    """Load a task's env cfg, selecting a physics backend before the choice is thrown away.
+
+    ``parse_env_cfg`` calls ``resolve_presets(cfg)`` with no selection, which collapses every
+    ``PresetCfg`` to its ``.default``. By the time it returns, the task's other backends no
+    longer exist on the object, so setting ``sim.physics`` afterwards is too late -- and setting
+    it to an unresolved preset is worse, because ``_resolve_physics_cfg`` collapses that to
+    ``.default`` again inside ``SimulationContext``, silently::
+
+        if not hasattr(physics_cfg, "class_type") and hasattr(physics_cfg, "default"):
+            physics_cfg = physics_cfg.default
+
+    That is why every run in this repo was PhysX no matter what the config said. Selecting a
+    backend means resolving the preset ourselves, with a name, before anything else touches it.
+
+    With no ``physics`` requested this is exactly ``parse_env_cfg``, so the default path is
+    unchanged.
+    """
+    from isaaclab_tasks.utils import load_cfg_from_registry, parse_env_cfg, resolve_presets
+
+    if not physics:
+        return parse_env_cfg(gym_id, device=device, num_envs=num_envs)
+
+    env_cfg = load_cfg_from_registry(gym_id.split(":")[-1], "env_cfg_entry_point")
+    if isinstance(env_cfg, dict):
+        raise RuntimeError(f"task {gym_id!r} registers a dict config; expected a class")
+
+    options = physics_options(getattr(env_cfg.sim, "physics", None))
+    if options and physics not in options:
+        raise ValueError(f"unknown sim.physics {physics!r}; this task offers {sorted(options)}")
+    wanted = options.get(physics)
+
+    resolve_presets(env_cfg, selected=(physics,))
+
+    # resolve_presets skips the validation Hydra performs, so an unrecognised name falls back to
+    # 'default' without a word. Checking is the whole point of this function.
+    got = getattr(env_cfg.sim, "physics", None)
+    if wanted is not None and type(got) is not type(wanted):
+        raise RuntimeError(
+            f"sim.physics={physics!r} did not take: expected {type(wanted).__name__}, got "
+            f"{type(got).__name__}."
+        )
+
+    env_cfg.sim.device = device
+    env_cfg.scene.num_envs = num_envs
+    return env_cfg
+
+
 def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | None = None):
     """Construct the Isaac Lab env cfg described by ``cfg``.
 
@@ -226,14 +296,12 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
     a config can then be validated in a fraction of a second instead of after a two-minute Kit
     startup.
     """
-    from isaaclab_tasks.utils import parse_env_cfg
-
     gym_id = resolve_task(cfg)
     scene_spec = cfg.get("scene") or {}
     sim_spec = cfg.get("sim") or {}
 
     n = num_envs if num_envs is not None else int(scene_spec.get("num_envs", 64))
-    env_cfg = parse_env_cfg(gym_id, device=sim_spec.get("device", device), num_envs=n)
+    env_cfg = load_env_cfg(gym_id, sim_spec.get("device", device), n, sim_spec.get("physics"))
 
     if "env_spacing" in scene_spec:
         env_cfg.scene.env_spacing = float(scene_spec["env_spacing"])
@@ -287,7 +355,8 @@ def describe(cfg: dict[str, Any]) -> str:
         f"objects   : {', '.join((s.get('objects') or {}) ) or '-'}",
         f"cameras   : {', '.join((s.get('cameras') or {})) or '-'}",
         f"sim       : dt={sim.get('dt','-')} decimation={sim.get('decimation','-')} "
-        f"episode_s={sim.get('episode_length_s','-')}",
+        f"episode_s={sim.get('episode_length_s','-')} "
+        f"physics={sim.get('physics') or 'task default'}",
         f"control   : source={ctl.get('source','-')} transport={ctl.get('transport','inprocess')} "
         f"horizon={ctl.get('action_horizon',1)}",
         f"objective : {obj.get('sequence','-')}",

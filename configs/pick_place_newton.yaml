@@ -1,0 +1,58 @@
+# The same pick-and-place task on Newton (MuJoCo-Warp) instead of PhysX.
+#
+#   python scripts/run.py --config configs/pick_place_newton.yaml --describe
+#   python scripts/run.py --config configs/pick_place_newton.yaml
+#
+# =====================================================================================
+#  CHOOSING A BACKEND
+#  Measured here, 4 envs / 30 steps, process start to exit (so101_scene/tuning.py):
+#
+#    physx                                 9 s
+#    newton_mjwarp, asset as authored    285 s    <- 1779 lines of CoACD log
+#    newton_mjwarp, convexHull            24 s    <- what this config does
+#
+#  Newton runs CoACD convex decomposition over the robot's 17 collision meshes at scene
+#  build. They are large (161k points on the wrist alone) and the asset explicitly asks
+#  for decomposition, so the cost is real. PhysX does none of it.
+#
+#  scene.robot.collision_approximation: convexHull overrides that, EXCEPT on the two
+#  bodies that form the pinch -- a hull across those fills in the notch the jaw grips
+#  with. It is a startup cost, not a per-step one, so for a long training run the plain
+#  asset is fine; for iterating, this is 12x faster to start.
+# =====================================================================================
+
+meta:
+  name: so101-pick-place-newton
+  notes: Backend comparison. Identical to pick_place_objective.yaml apart from sim.physics.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  spawn: "box(0.20, 0.0, 0.0125, 0.03, 0.06, 0.0)"
+  sequence: "pick[random] place[random(0.0, 0.20, 0.12, r0.06)]"
+
+scene:
+  num_envs: 64
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    collision_approximation: convexHull    # omit to keep the asset's convexDecomposition
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+
+sim:
+  episode_length_s: 5.0
+  # physx | isaacsim_physx | newton_mjwarp -- whatever the task's physics preset declares.
+  # An unknown name is rejected at build time with the valid list.
+  physics: newton_mjwarp
+
+control:
+  source: zero
+  action_horizon: 1

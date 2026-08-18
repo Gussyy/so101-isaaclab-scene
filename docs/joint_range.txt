@@ -35,10 +35,23 @@ Reading this
   the current one.
 * The narrow columns are the task, not the arm. A 5-second episode, one cube 20 cm in front and
   a goal 20 cm to the side does not need 200 degrees of shoulder travel.
-* gripper spans 11%: commanded 0.0 (close) / 1.2 (open) by BinaryJointPositionAction, but the
-  measured joint never passes 0.202 rad. Worth a look -- it is consistent with the "no measurable
-  jaw travel" result in workspace.txt, and it means the jaw pinches nearly closed rather than
-  opening and enclosing.
+* gripper spans 11%, and this was WRONGLY read here as the jaw being unable to open. It opens
+  fine. Commanding the open action with nothing in the jaw:
+
+      commanded OPEN for 200 steps -> q reached +1.1998 against a commanded 1.2
+        steps 0, 10, 50, 100, 199:  +0.2000, +1.1932, +1.1998, +1.1998, +1.1998
+        applied torque at the end:  +0.0034 N.m, against a 10 N.m limit
+      commanded CLOSE for 60 steps -> q -0.0001
+
+  It reaches the target in about ten steps using a three-thousandth of the available torque.
+  The 11% is the *policy's* choice: it closes on the cube at the start of the episode and holds
+  it, so open is essentially never commanded, and 0.202 rad is a startup transient. Correct
+  behaviour for pick-and-place, not a fault.
+
+  The earlier suspicion that this was linked to the "no measurable jaw travel" line in
+  workspace.txt was also wrong. That measurement reads the separation between jaw *body origins*,
+  which does not change as the revolute jaw sweeps -- a property of where the origins sit, not of
+  whether the jaw moves.
 
 Reproduce: the table above comes from stepping configs/variants/goal_centre.yaml under the
 trained checkpoint and recording per-joint min/max of joint_pos against joint_pos_limits.

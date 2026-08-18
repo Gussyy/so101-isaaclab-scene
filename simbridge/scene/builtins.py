@@ -32,7 +32,12 @@ def _so101(spec: dict[str, Any]) -> ArticulationCfg:
     """TheRobotStudio SO-ARM101, 5-DOF + single-jaw gripper."""
     from so101_scene.tuning import so101_cfg
 
-    cfg = so101_cfg(spec.get("prim_path", "{ENV_REGEX_NS}/Robot"))
+    # collision_approximation: "convexHull" skips most of Newton's CoACD startup cost, at the
+    # price of grasp fidelity everywhere except the pinch bodies. See so101_scene.tuning.
+    cfg = so101_cfg(
+        spec.get("prim_path", "{ENV_REGEX_NS}/Robot"),
+        collision_approximation=spec.get("collision_approximation"),
+    )
     init = ArticulationCfg.InitialStateCfg(
         pos=_pos(spec),
         # Isaac Lab 3.0 quaternions are (x, y, z, w); 2.x was (w, x, y, z).

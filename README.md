@@ -194,6 +194,46 @@ The sphere is a **maximum**, not the reachable set. The real envelope is a lopsi
 hole around the base, and only 27% of it can be approached from above — that's what
 [docs/workspace.png](docs/workspace.png) draws. Numbers: [docs/joint_range.txt](docs/joint_range.txt).
 
+## Physics backends
+
+The task ships a PhysX config and a Newton (MuJoCo-Warp) one; pick either from the config:
+
+```yaml
+sim:
+  physics: newton_mjwarp     # physx | isaacsim_physx | newton_mjwarp
+scene:
+  robot:
+    collision_approximation: convexHull   # optional, see below
+```
+
+An unknown name is rejected at build time with the list the task actually offers.
+
+**This did not work until now.** `sim.physics` was an accepted key that nothing applied, and both
+`parse_env_cfg` and `SimulationContext` collapse an unresolved preset to its `.default` without a
+word — so every run here was PhysX regardless of what the config said. Selecting a backend means
+resolving the preset *before* `parse_env_cfg` throws the alternatives away.
+
+### Startup cost
+
+Newton runs CoACD convex decomposition over the robot's 17 collision meshes at scene build. They
+are large — 161k points on the wrist alone — and the asset explicitly asks for decomposition.
+Measured here, 4 envs / 30 steps, process start to exit:
+
+| | wall | CoACD log lines |
+|---|---|---|
+| `physx` | **9 s** | 0 |
+| `newton_mjwarp`, asset as authored | **285 s** | 1779 |
+| `newton_mjwarp`, `collision_approximation: convexHull` | **24 s** | 234 |
+
+The override keeps decomposition on the two bodies that form the pinch (`moving_jaw`,
+`wrist_roll_follower`) — a convex hull across those fills in the notch the jaw grips with. The
+other 15 are structural links and servo housings.
+
+It is a *startup* cost, not a per-step one, so for a long training run the plain asset is fine.
+
+Config: [`configs/pick_place_newton.yaml`](configs/pick_place_newton.yaml) · reasoning:
+[`so101_scene/tuning.py`](so101_scene/tuning.py).
+
 ## Objects
 
 Beyond a coloured `cuboid`, a config can name a prop from Isaac Sim's YCB set:
