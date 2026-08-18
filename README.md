@@ -8,6 +8,43 @@ standalone physics scene plus two Gym-registered PPO tasks â€” **reach** and
 Built and measured on Isaac Sim 6.0.1 + Isaac Lab 3.0 (`develop`), Windows 11,
 RTX 4070 Ti 12 GB, i5-13600KF.
 
+
+## Results
+
+Trained policy: **92 % success rate** on pick-and-place, 1500 iterations / 8192 parallel envs,
+78 minutes on one RTX 4070 Ti.
+
+![reward curve](docs/reward_curve.png)
+
+[Policy video](docs/pick_place_policy.mp4) — grasp, lift, carry to the commanded pose.
+
+| metric | start | final | best |
+|---|---|---|---|
+| `Metrics/success_rate` | 0.000 | **0.921** | 0.936 |
+| `Train/mean_reward` | 0.45 | **158.5** | 162.2 |
+| `Episode_Reward/lifting_object` | 0.04 | 14.02 | 14.09 |
+| `Episode_Reward/object_goal_tracking` | 0.005 | 13.91 | 13.98 |
+| `Metrics/object_pose/position_error` | 0.272 m | **0.073 m** | — |
+
+The balance between `lifting_object` (14.02) and `object_goal_tracking` (13.91) is the thing to
+look at. In the run that failed they were 4.53 and 0.05: the policy was paid to lift and not to
+carry, so it lifted and held. Comparable magnitudes mean both stages are worth doing.
+
+Success is defined as the object reaching within 5 cm of the commanded pose. On a 2.5 cm cube
+that is a real but not strict tolerance; the training env also carries observation noise that
+the play env does not.
+
+Reproduce:
+
+```bash
+python scripts/train.py --rl_library rsl_rl --task SO101-PickPlace-v0 --num_envs 8192
+python scripts/plot_rewards.py
+python scripts/play.py --rl_library rsl_rl --task SO101-PickPlace-Play-v0 --num_envs 9 --video
+```
+
+Video recording needs `pip install "moviepy<2" imageio-ffmpeg` — the isaacsim bundle ships
+neither, and moviepy 2.x fails because Isaac Lab's recorder uses the v1 API.
+
 ## Contents
 
 | Path | What it is |
