@@ -218,10 +218,19 @@ class SO101CubePickPlaceEnvCfg(LiftEnvCfg):
         self.rewards.reaching_object.params["std"] = 0.10
         self.rewards.lifting_object.params["minimal_height"] = 0.025
         self.rewards.object_goal_tracking.params["minimal_height"] = 0.025
-        self.rewards.object_goal_tracking.params["std"] = 0.12
-        self.rewards.object_goal_tracking.params["success_threshold"] = 0.03
+        # Goal-tracking shaping stays at the upstream 0.3. Tightening it to 0.12 -- the same
+        # "3x smaller arm" reasoning that already broke reaching_object -- was measured to
+        # cost the whole place stage: at the observed 0.335 m object-to-goal distance,
+        # 1 - tanh(d/std) gives 0.007 at std=0.12 versus 0.194 at 0.30. The run that used
+        # 0.12 learned to lift the cube (lifting_object +4.53) and then hold it, because
+        # carrying it toward the goal paid only +0.05. Distance to goal actually got worse
+        # over training (0.272 -> 0.335) and success_rate finished at 0.13%.
+        #
+        # The width has to span the distance the object must travel, not the arm's size.
+        self.rewards.object_goal_tracking.params["std"] = 0.30
+        self.rewards.object_goal_tracking.params["success_threshold"] = 0.05
         self.rewards.object_goal_tracking_fine_grained.params["minimal_height"] = 0.025
-        self.rewards.object_goal_tracking_fine_grained.params["std"] = 0.03
+        self.rewards.object_goal_tracking_fine_grained.params["std"] = 0.05
 
         self.rewards.joint_vel.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=SO101_ARM_JOINTS)
 
