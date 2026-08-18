@@ -24,6 +24,7 @@ import weakref
 import numpy as np
 
 from simbridge.interfaces import ActionSource
+from simbridge.objective import SO101_ACTION_LIMITS, resolve_action_limits  # noqa: F401
 from simbridge.registry import register_source
 from simbridge.schema import ObsPacket
 
@@ -41,7 +42,6 @@ RESET_KEY = "N"
 
 JOINT_LABELS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 
-
 @register_source("keyboard")
 class KeyboardSource(ActionSource):
     """Teleoperate the arm from the Isaac Sim window.
@@ -53,6 +53,9 @@ class KeyboardSource(ActionSource):
         gripper_close: Gripper action value when closed.
         broadcast: Apply the same command to every environment. Teleoperating one arm out of 256
             is rarely what anyone means, so this defaults to on.
+        action_limit: How far a key may drive each joint, in action units. A scalar applies
+            symmetrically to every joint; a list of ``[lo, hi]`` pairs sets them individually.
+            Defaults to :data:`SO101_ACTION_LIMITS`, which spans the arm's real joint range.
     """
 
     def __init__(
@@ -63,6 +66,7 @@ class KeyboardSource(ActionSource):
         gripper_close: float = -1.0,
         broadcast: bool = True,
         action_horizon: int = 1,
+        action_limit=None,
         **_: object,
     ) -> None:
         super().__init__(action_horizon=action_horizon)
@@ -71,6 +75,7 @@ class KeyboardSource(ActionSource):
         self.gripper_open = float(gripper_open)
         self.gripper_close = float(gripper_close)
         self.broadcast = bool(broadcast)
+        self.limits = resolve_action_limits(action_limit, self.action_dim)
 
         self._target = np.zeros(self.action_dim, dtype=np.float32)
         self._closed = False
@@ -112,10 +117,13 @@ class KeyboardSource(ActionSource):
         name = event.input.name
 
         for i, (inc, dec) in enumerate(DEFAULT_BINDINGS):
+            if i >= self.action_dim:
+                break
+            lo, hi = self.limits[i]
             if name == inc:
-                self._target[i] = float(np.clip(self._target[i] + self.step, -1.0, 1.0))
+                self._target[i] = float(np.clip(self._target[i] + self.step, lo, hi))
             elif name == dec:
-                self._target[i] = float(np.clip(self._target[i] - self.step, -1.0, 1.0))
+                self._target[i] = float(np.clip(self._target[i] - self.step, lo, hi))
 
         if name == GRIPPER_KEY:
             self._closed = not self._closed

@@ -298,6 +298,12 @@ python scripts/run.py --config configs/pick_place_teleop.yaml
 Keys move a held target rather than applying a per-frame delta, so the arm stays where you put
 it instead of springing back when you stop typing.
 
+**Key travel spans the arm's real joint range**, not ±1 action units. One action unit is 0.5 rad
+added to the joint's default pose, so capping the held target at the obvious ±1 stops every joint
+at half a radian — between 18% and 30% of its travel — and the arm appears to hit a wall that is
+not there. The default limits are per-joint and asymmetric, because the crouch start pose is not
+centred in each joint's range; override with `control.action_limit`.
+
 Joints are driven directly rather than through IK. Isaac Lab's `Se3Keyboard` emits end-effector
 deltas, which need a solver — and on a 5-DOF arm that solver has to soft-weight orientation,
 since the SO-101 cannot reach an arbitrary 6-DOF pose. Direct joint control avoids it and matches

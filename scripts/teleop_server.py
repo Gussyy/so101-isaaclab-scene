@@ -30,6 +30,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from simbridge.objective import resolve_action_limits  # noqa: E402
 from simbridge.schema import ObsPacket  # noqa: E402
 from simbridge.transport import ZmqPolicyServer  # noqa: E402
 
@@ -79,11 +80,15 @@ def _read_keys(on_key, stop: threading.Event) -> None:
 class KeyboardDriver:
     """Holds a joint target that keys nudge, and serves it as an action."""
 
-    def __init__(self, action_dim: int, step: float, gripper_open: float, gripper_close: float) -> None:
+    def __init__(self, action_dim: int, step: float, gripper_open: float, gripper_close: float,
+                 action_limit=None) -> None:
         self.action_dim = action_dim
         self.step = step
         self.gripper_open = gripper_open
         self.gripper_close = gripper_close
+        # Same limits as the in-process source. Clipping to +/-1 here caps every joint at half a
+        # radian from its default pose -- the arm stops because the driver stopped.
+        self.limits = resolve_action_limits(action_limit, action_dim)
         self.target = np.zeros(action_dim, dtype=np.float32)
         self.closed = False
         self._lock = threading.Lock()
@@ -93,10 +98,11 @@ class KeyboardDriver:
             for i, (inc, dec) in enumerate(BINDINGS):
                 if i >= self.action_dim:
                     break
+                lo, hi = self.limits[i]
                 if ch == inc:
-                    self.target[i] = float(np.clip(self.target[i] + self.step, -1.0, 1.0))
+                    self.target[i] = float(np.clip(self.target[i] + self.step, lo, hi))
                 elif ch == dec:
-                    self.target[i] = float(np.clip(self.target[i] - self.step, -1.0, 1.0))
+                    self.target[i] = float(np.clip(self.target[i] - self.step, lo, hi))
             if ch == " ":
                 self.closed = not self.closed
             elif ch == "n":
@@ -124,9 +130,12 @@ def main() -> None:
     ap.add_argument("--step", type=float, default=0.05, help="target change per keypress")
     ap.add_argument("--gripper-open", type=float, default=1.0)
     ap.add_argument("--gripper-close", type=float, default=-1.0)
+    ap.add_argument("--action-limit", type=float, default=None,
+                    help="symmetric cap per joint in action units; default spans the arm's real range")
     args = ap.parse_args()
 
-    driver = KeyboardDriver(args.action_dim, args.step, args.gripper_open, args.gripper_close)
+    driver = KeyboardDriver(args.action_dim, args.step, args.gripper_open, args.gripper_close,
+                            action_limit=args.action_limit)
 
     print(f"[teleop] serving on {args.endpoint}\n")
     for i, (inc, dec) in enumerate(BINDINGS):

@@ -98,6 +98,44 @@ def graspable(width: float, jaw: float = JAW_WIDTH) -> tuple[bool, str]:
     return True, f"{width * 1000:.0f} mm"
 
 
+# How far a key press may drive each joint, in action units.
+#
+# A unit of action is `scale` radians (0.5 in these tasks) added to the joint's default pose, so
+# clipping the held target to the obvious +/-1 caps every joint at +/-0.5 rad -- between 18% and
+# 30% of its actual travel. That is what makes keyboard teleop feel like the arm has hit a wall
+# while nothing in the simulator is stopping it: the *driver* stopped, not the robot. A trained
+# policy escapes it by emitting +/-11, because the environment does not clip actions at all.
+#
+# These bounds are (joint_limit - default_pose) / scale for the SO-101 in the crouch pose the
+# configs use, and they are asymmetric because that pose is not centred in the joint's range.
+# Change `scene.robot.joint_pos` or the action scale and they change with it; set
+# `control.action_limit` in the config to override.
+SO101_ACTION_LIMITS: list[tuple[float, float]] = [
+    (-3.84, 3.84),   # shoulder_pan   +/-1.920 rad from 0.00
+    (-2.29, 4.69),   # shoulder_lift  +/-1.745 rad from -0.60
+    (-4.98, 1.78),   # elbow_flex     +/-1.690 rad from 0.80
+    (-4.52, 2.12),   # wrist_flex     +/-1.658 rad from 0.60
+    (-5.49, 5.68),   # wrist_roll     -2.744..+2.841 rad from 0.00
+    (-1.00, 1.00),   # gripper        binary action; only the sign matters
+]
+
+
+def resolve_action_limits(spec, action_dim: int) -> list[list[float]]:
+    """Normalise an ``action_limit`` config value into a list of ``[lo, hi]`` pairs."""
+    if spec is None:
+        rows = SO101_ACTION_LIMITS[:action_dim]
+    elif isinstance(spec, (int, float)):
+        rows = [(-abs(float(spec)), abs(float(spec)))] * action_dim
+    else:
+        rows = [tuple(float(v) for v in pair) for pair in spec]
+    if len(rows) < action_dim:
+        rows = list(rows) + [(-1.0, 1.0)] * (action_dim - len(rows))
+    out = [list(r) for r in rows[:action_dim]]
+    if any(lo >= hi for lo, hi in out):
+        raise ValueError(f"action_limit needs lo < hi per joint, got {out}")
+    return out
+
+
 class ObjectiveError(ValueError):
     """Raised for a malformed or unreachable objective."""
 
@@ -450,6 +488,19 @@ def demo() -> None:
     """Self-check: the grammar, and the reach guard that is the point of it."""
     pickable = ["cube_red", "cube_blue"]
 
+    # Action limits: the driver-side cap that made keyboard teleop look like a broken arm.
+    lim = resolve_action_limits(None, 6)
+    assert len(lim) == 6 and lim[0] == [-3.84, 3.84]
+    assert lim[1][1] > 4.0, lim[1]                      # asymmetric: the crouch pose is off-centre
+    assert resolve_action_limits(2.0, 3) == [[-2.0, 2.0]] * 3
+    assert resolve_action_limits([[-1, 1]], 2) == [[-1.0, 1.0], [-1.0, 1.0]]   # padded, not truncated
+    try:
+        resolve_action_limits([[1.0, -1.0]], 1)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("lo >= hi should be rejected")
+
     # Grasp width: the jaw is the other hard limit besides reach.
     assert graspable(0.025)[0], "the task's own 25 mm cube must pass"
     ok, why = graspable(PROP_CATALOGUE["mug"][1])
@@ -521,7 +572,7 @@ def demo() -> None:
     clean = parse_objective("pick[random] place[random(0.20, 0.0, 0.12, r0.06)]", pickable)
     assert not clean.warnings, clean.warnings
 
-    print("objective demo OK: grasp widths, grammar, colon form, subsets, boxes, reach rejection and warnings")
+    print("objective demo OK: action limits, grasp widths, grammar, colon form, subsets, boxes, reach rejection and warnings")
     print(f"  example -> {o.describe()}")
     print(f"  warning -> {o.warnings[0][:96]}...")
 

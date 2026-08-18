@@ -25,6 +25,14 @@ sim:
 control:
   source: keyboard
   transport: inprocess
-  step: 0.05                 # target change per keypress
+  step: 0.05                 # target change per keypress, in action units
   broadcast: true            # same command to every env
   action_horizon: 1
+
+  # How far a key may drive each joint. One action unit is 0.5 rad added to the joint's default
+  # pose, so the obvious cap of 1.0 would stop every joint at half a radian -- 18% to 30% of its
+  # real travel -- and the arm looks like it hit a wall that is not there. Omit this and the
+  # default spans the arm's actual joint limits (simbridge.objective.SO101_ACTION_LIMITS).
+  # A single number caps every joint symmetrically; a list sets [lo, hi] per joint.
+  #
+  # action_limit: [[-3.84, 3.84], [-2.29, 4.69], [-4.98, 1.78], [-4.52, 2.12], [-5.49, 5.68], [-1.0, 1.0]]
