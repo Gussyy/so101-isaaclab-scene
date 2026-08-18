@@ -1,0 +1,68 @@
+# SO-ARM101 pick-and-place. Everything the scene and driver need lives here;
+# reward/termination logic stays in Python (so101_scene/pick_place_env_cfg.py).
+#
+#   python scripts/run.py --config configs/pick_place.yaml
+#   python scripts/run.py --config configs/pick_place.yaml --set control.source=zero
+meta:
+  name: so101-pick-place
+  notes: >
+    Baseline config. Cameras are declared but cost VRAM: measured 27k frames/s at 128px,
+    with 512 envs x 1 cam or 256 envs x 2 cams filling a 12 GB card (docs/bench_camera.txt).
+
+task: pick_place
+
+scene:
+  num_envs: 256
+  env_spacing: 1.0
+
+  robot:
+    type: so101
+    pos: [0.0, 0.0, 0.0]
+    # Isaac Lab 3.0 quaternions are (x, y, z, w). 90 deg about +Z turns the arm to face +x,
+    # where the cube and the command targets are.
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    # Mid-range crouch. The asset default is all-zeros, which extends the arm away from the
+    # workspace and makes the reaching reward structurally unreachable.
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+      gripper: 0.0
+
+  objects: {}   # the cube comes from the Python task cfg; add extra props here
+
+  cameras:
+    scene_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/SceneCam"
+      resolution: [128, 128]
+      pos: [0.55, 0.0, 0.35]
+      rot: [0.0, 0.259, 0.0, 0.966]
+      focal_length: 18.0
+      clipping_range: [0.01, 3.0]
+    wrist_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/Robot/gripper/WristCam"
+      resolution: [128, 128]
+      pos: [0.0, -0.04, 0.02]
+      rot: [0.5, -0.5, 0.5, 0.5]
+      focal_length: 12.0
+      clipping_range: [0.01, 1.5]
+
+sim:
+  episode_length_s: 5.0
+  physics: isaacsim_physx   # newton_mjwarp works but pays ~900 CPU-s of CoACD at scene build
+
+control:
+  # Swap this line to change what drives the env; nothing else changes.
+  #   zero | random | rl_checkpoint | zmq
+  source: rl_checkpoint
+  transport: inprocess
+  action_horizon: 1         # Ta. Raise to 8-15 for chunked generative policies.
+  checkpoint: logs/rsl_rl/pick_place_so101/2026-08-18_17-22-09/model_1499.pt
+
+  # For source: zmq -- the policy runs in its own process.
+  # endpoint: tcp://127.0.0.1:5555
+  # timeout_ms: 30000

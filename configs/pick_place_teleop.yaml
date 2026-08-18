@@ -1,0 +1,30 @@
+# Same scene, driven by a remote process instead of a checkpoint.
+# Start a driver first (scripts/policy_server.py), then run this.
+meta:
+  name: so101-pick-place-remote
+  notes: Demonstrates that only the `control` block changes to swap the driver.
+
+task: pick_place
+
+scene:
+  num_envs: 4
+  env_spacing: 1.0
+  robot:
+    type: so101
+    rot: [0.0, 0.0, 0.70710678, 0.70710678]
+    joint_pos: {shoulder_pan: 0.0, shoulder_lift: -0.6, elbow_flex: 0.8, wrist_flex: 0.6, wrist_roll: 0.0, gripper: 0.0}
+  cameras:
+    scene_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/SceneCam"
+      resolution: [128, 128]
+
+sim:
+  episode_length_s: 5.0
+
+control:
+  source: zmq
+  transport: zmq
+  endpoint: tcp://127.0.0.1:5555
+  timeout_ms: 30000
+  action_horizon: 1
