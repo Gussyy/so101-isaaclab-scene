@@ -1,0 +1,14 @@
+Rendered-observation throughput, RTX 4070 Ti 12GB, SO101-PickPlace-v0, 128x128
+measured 2026-08-18 with scripts/bench_camera.py
+
+envs   cams  env_steps/s   frames/s   ms/step   VRAM_MiB 
+32     1     1545          1545       20.7      5042     
+128    1     7045          7045       18.2      6655     
+512    1     27378         27378      18.7      10110    
+128    2     6883          13767      18.6      6367     
+256    2     13904         27809      18.4      9113     
+
+state-only reference: 8192 envs -> ~120,000 env-steps/s, 5.7 GB
+ms/step is flat ~18-21ms regardless of env count (tiled rendering amortises a fixed cost),
+so throughput scales linearly with envs and VRAM is the binding constraint.
+GPU render ceiling is ~27,000 frames/s at 128px; spend it on envs or on cameras.
