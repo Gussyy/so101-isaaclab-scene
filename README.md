@@ -246,16 +246,28 @@ sim:
 ```
 
 Measured over 300 steps, deformation being per-node displacement after removing rigid motion:
-the soft body squashes **2.97 mm** on landing and its span goes 0.050 → 0.054 m; cloth draped
-across the gripper reaches **57.9 mm**. Both survive `env.reset()`. Cloth landing flat on a flat
-table reads 0.00 mm, which is correct — uniform contact produces no relative deformation.
+
+| | peak deformation |
+|---|---|
+| cloth draped over a static post | **43.5 mm** — settles by step 40 and holds |
+| soft body landing on the table | **5.0 mm** — ~2% strain |
+
+Both survive `env.reset()`, and the rigid cube stays on the table throughout.
 
 `soft_body` needs `pip install "pytetwild[all]>=0.3.0,<0.4"`, which a default Isaac Lab install
 omits.
 
+Two things that are easy to get wrong, both of which cost real time here and are written up in
+[docs/PHYSICS.md](docs/PHYSICS.md):
+
+- **Static shapes must be claimed by an entry.** The table and ground are Newton body index −1,
+  so naming `/Robot` and `/Object` never claims them, and unassigned elements stay outside every
+  solver. The cloth then has nothing to land on and the cube falls through the table.
+- **Do not proxy light free-floating bodies.** Proxying the 15 g cube so the cloth could drape on
+  it launched it to **z = +25 m**. Drape over a `static_cuboid` instead.
+
 **The parameters are solver stiffnesses, not material properties, and none of them have been
 identified against a real fabric or foam.** Plausible, not predictive.
-[docs/PHYSICS.md](docs/PHYSICS.md) says exactly what that costs, and what is still unresolved.
 
 Configs: [`cloth.yaml`](configs/cloth.yaml) · [`soft_body.yaml`](configs/soft_body.yaml) ·
 [`pick_place_newton.yaml`](configs/pick_place_newton.yaml) · reasoning:

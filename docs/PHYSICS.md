@@ -92,30 +92,74 @@ pip install "pytetwild[all]>=0.3.0,<0.4"
 300 steps at 1 env, deformation measured as per-node displacement after removing rigid
 translation, then `env.reset()`:
 
-| | result |
+| | peak deformation | |
+|---|---|---|
+| `cloth` draped over a static post | **43.5 mm** | settles by step 40 and holds to 200 |
+| `soft_body` landing on the table | **5.0 mm** | ~2% strain, stable |
+| `cloth` landing flat on a flat table | 0.0 mm | correct — uniform contact, no relative deformation |
+
+Both survive `env.reset()`, and the task's rigid cube stays on the table throughout.
+
+### Why the cloth used to fall straight through everything
+
+This took a long time to find, so it is worth writing down properly.
+
+**Static shapes belonged to no solver entry.** `CouplerEntryCfg.bodies` claims bodies and, with
+`include_body_shapes=True`, the shapes attached to them. The table and ground plane are *static*
+shapes — Newton body index `-1` — so naming `/Robot` and `/Object` never claimed them. And per
+`CouplerCfg`:
+
+> Bodies, particles, joints, and shapes may be assigned to at most one entry. **Unassigned model
+> elements remain outside the nested solvers.**
+
+So the table was in neither solver. The cloth had nothing to land on, and the cube had nothing to
+rest on — it fell through to `z = -0.05`, tripped `object_dropping`, and reset. Forever.
+
+Copying `include_static_shapes=True` onto the *soft* entry, as the shipped Franka task does, is
+equally wrong here: it takes the table away from the rigid solver instead of leaving it nowhere.
+Both arrangements produce **byte-identical** behaviour, which is what made this expensive — I
+changed `num_substeps` from 2 to 4 and the trajectory did not move by a single digit. That should
+have been the tell immediately: if doubling the substep count changes nothing, the thing you are
+configuring is not in the loop.
+
+The fix is `include_static_shapes=True` on the **rigid** entry. The cloth still feels the table,
+through the proxy's shared outer contacts (`collision_pipeline=None`, which requires
+`collide_interval=None`).
+
+The Franka task gets away with the other arrangement because its arm is fixed-base and its cloth
+rests on rigid supports — it has no free-floating rigid body that needs a floor.
+
+### Do not proxy light free-floating bodies
+
+Adding the 2.5 cm cube to the proxy mapping does let the cloth collide with it. It also launches
+it: measured `z = +10.7 m` at step 40, `+25.7 m` by step 120. The lagged impulse exchange is not
+stable for a 15 g free body.
+
+Everything the shipped Franka task proxies is effectively immovable — the hand and fingers of a
+fixed-base arm, and static supports. Follow that. To give cloth something to drape over, use a
+`static_cuboid`, as `configs/cloth.yaml` does; static shapes belong to the rigid entry and reach
+the soft solver through shared outer contacts, and cannot be destabilised.
+
+### Stability limits, measured
+
+The soft body is stable at `k_mu = 3e3` dropped from 0.10 m. Two nearby settings are not, both
+dying with `CUDA error: an illegal memory access was encountered`:
+
+| | |
 |---|---|
-| `soft_body` falls, lands, squashes | **2.97 mm peak**, span 0.050 → 0.054 m, stable, resets cleanly |
-| `cloth` falls and lands | stable, resets cleanly |
-| `cloth` draped across the gripper | **57.9 mm peak** |
-| `cloth` landing flat on the table | **0.00 mm** — correct: uniform contact produces no relative deformation |
+| `k_mu = 8e2`, drop 0.20 m | crashes |
+| `k_mu = 1.5e3`, drop 0.20 m | crashes |
+| `k_mu = 3e3`, drop 0.10 m | **stable** |
 
-**Unresolved: cloth dropped onto the 2.5 cm cube does not catch on it.** It lands flat, reading
-0.00 mm, even with `/Object` in both the rigid entry and the proxy mapping. Cloth-against-gripper
-contact does register, so the coupling works in general and something about that specific pair
-does not. Do not read the cloth config as a demonstration of cloth-object manipulation; it
-demonstrates a sheet falling and colliding with the table and the arm.
+Impact energy matters as much as stiffness — the same stiffness that survives a 0.10 m drop can
+fail at 0.20 m. If you soften the material, lower the drop with it.
 
-### Two failures worth knowing about
+### A diagnostic that misled me
 
-Both presented as `CUDA error: an illegal memory access was encountered`, which is an unhelpful
-thing to debug from:
-
-- **A rigid body in no solver entry.** The cube was not listed in the `rigid` `CouplerEntryCfg`.
-  The run died the moment the cloth reached it. Every rigid body in the scene has to belong to
-  an entry — the shipped Franka task lists its supports for this reason.
-- **Contact buffer overflow.** `rigid_body_particle_contact_buffer_size=1024`, copied from the
-  Franka task, overflowed and wrote out of bounds as soon as the material was soft enough to
-  produce real contact counts. 8192 is stable here.
+A flat sheet landing on a flat table reports **0.00 mm** deformation, and that is correct: every
+particle contacts at once, so there is no relative motion to measure. It is indistinguishable
+from a cloth that is not simulating at all. Give the cloth an obstacle before concluding
+anything from a deformation number.
 
 ### Full-surface contact is off, deliberately
 

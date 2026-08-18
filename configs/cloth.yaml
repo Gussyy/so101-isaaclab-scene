@@ -49,10 +49,22 @@ scene:
       wrist_roll: 0.0
       gripper: 0.0
   objects:
+    # Something for the cloth to drape over. Static on purpose: a static shape belongs to the
+    # rigid solver and reaches the cloth through the proxy's shared outer contacts, and being
+    # immovable it cannot be destabilised by the lagged impulse exchange. Draping the cloth over
+    # the task's free-floating 15 g cube instead launched it to z = +25 m.
+    post:
+      type: static_cuboid
+      size: [0.035, 0.035, 0.045]
+      pos: [0.20, 0.0, 0.0225]
+      color: [0.30, 0.32, 0.36]
+
     cloth:
       type: cloth
       size: [0.12, 0.12]
       resolution: [16, 16]    # 256 particles; ~8 mm spacing against a ~36 mm jaw
+      tri_ke: 1.0e4           # Isaac Lab's deformables demo randomises 5e3..5e4
+      tri_ka: 1.0e4
       pos: [0.20, 0.0, 0.09]      # above the task cube, clear of the jaw (which sits at z~0.185)
       color: [0.95, 0.85, 0.10]
   cameras:

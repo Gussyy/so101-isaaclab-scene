@@ -161,6 +161,14 @@ class PickPlacePhysicsCfg(PresetCfg):
                         r"/World/envs/env_[^/]+/Robot",
                         r"/World/envs/env_[^/]+/Object",
                     ],
+                    # The table and ground are STATIC shapes -- body index -1 -- so naming
+                    # bodies above does not claim them, and "unassigned model elements remain
+                    # outside the nested solvers". Without this the rigid solver has no table:
+                    # the cube falls straight through it to z=-0.05 and the episode terminates
+                    # on object_dropping, every single time. Putting them on the soft entry
+                    # instead is equally wrong, and produces byte-identical wrong behaviour --
+                    # which is how long it took to notice they simply belonged nowhere.
+                    include_static_shapes=True,
                 ),
                 CouplerEntryCfg(
                     name="soft",
@@ -169,7 +177,9 @@ class PickPlacePhysicsCfg(PresetCfg):
                         rigid_body_particle_contact_buffer_size=8192,
                     ),
                     all_particles=True,
-                    include_static_shapes=True,
+                    # Static shapes go to the rigid entry, not here -- see the note above. The
+                    # cloth still gets to feel them, through the proxy's shared outer contacts.
+                    include_static_shapes=False,
                 ),
             ],
             proxies=[
@@ -191,9 +201,20 @@ class PickPlacePhysicsCfg(PresetCfg):
                     bodies=[
                         r"/World/envs/env_[^/]+/Robot/gripper",
                         r"/World/envs/env_[^/]+/Robot/moving_jaw_so101_v1",
-                        r"/World/envs/env_[^/]+/Object",
                     ],
-                    collide_interval=1,
+                    # The cube is deliberately NOT proxied. Exposing it here does let the cloth
+                    # collide with it -- and the lagged impulse exchange then launches a 15 g
+                    # free body to z = +25 m within a second. The shipped Franka task only ever
+                    # proxies things that cannot meaningfully react: the hand and fingers of a
+                    # fixed-base arm, and static supports. A light free-floating rigid body is
+                    # outside that pattern. Give the cloth something static to drape over
+                    # instead (type: static_cuboid); static shapes belong to this entry and
+                    # reach the soft solver through the proxy's shared outer contacts.
+                    # None on both: "setting the field or returning None from the factory
+                    # passes shared outer contacts to the destination", which is how the soft
+                    # solver gets to see the table without owning it. collide_interval must be
+                    # None too -- an explicit value requires collision_pipeline to be a factory.
+                    collide_interval=None,
                     # The shipped Franka cloth task sets
                     # enable_rigid_soft_full_surface_contact=True here. We cannot: that mode
                     # samples each rigid shape's signed-distance field, the SO-101's collision
@@ -205,19 +226,23 @@ class PickPlacePhysicsCfg(PresetCfg):
                     # is only as grippable as its particle spacing is fine: the jaw is ~36 mm,
                     # so at 8x8 over a 120 mm sheet (15 mm spacing) it can catch between
                     # particles. Hence the denser default in configs/cloth.yaml.
-                    collision_pipeline=NewtonCollisionPipelineCfg(),
+                    collision_pipeline=None,
                 )
             ],
             iterations=1,
         ),
         soft_contact_cfg=NewtonSoftContactCfg(
-            soft_contact_ke=8.0e3,
+            # 1e5, from Isaac Lab's own deformables demo, not the 8e3 of the Franka cloth task.
+            # The Franka cloth drapes over large flat supports, where a soft contact is fine; a
+            # 2.5 cm cube is small enough that 8e3 simply lets the sheet push through it.
+            soft_contact_ke=1.0e5,
             soft_contact_kd=1.0e-2,
             # High, deliberately: a single jaw pinching a sheet is friction-limited in the same
             # way it is on the rigid cube, only more so.
             soft_contact_mu=10.0,
         ),
-        num_substeps=2,
+        # 4, matching the demo. Contact resolution against small features needs them.
+        num_substeps=4,
     )
     physx = PhysxAutoCfg(isaacsim_physx=isaacsim_physx)
     default = isaacsim_physx
