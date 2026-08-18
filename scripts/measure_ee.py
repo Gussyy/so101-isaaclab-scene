@@ -26,6 +26,8 @@ import isaaclab.sim as sim_utils  # noqa: E402
 from isaaclab.assets import Articulation  # noqa: E402
 from isaaclab.sim import SimulationContext  # noqa: E402
 
+from isaaclab.utils.math import quat_apply_inverse  # noqa: E402
+
 from so101_scene.tuning import so101_cfg  # noqa: E402
 
 
@@ -40,8 +42,9 @@ def main() -> None:
         robot.update(sim.get_physics_dt())
 
     names = robot.body_names
-    root = robot.data.root_pose.torch[0, :3]
-    pos = robot.data.body_pose_w.torch[0, :, :3]
+    root = robot.data.root_pos_w.torch[0, :3]
+    pos = robot.data.body_pos_w.torch[0]
+    quat = robot.data.body_quat_w.torch[0]
 
     print("\n" + "=" * 60)
     print("Body positions in robot root frame (default joint pose)")
@@ -51,12 +54,19 @@ def main() -> None:
         print(f"  {n:<24} ({rel[0]:+.4f}, {rel[1]:+.4f}, {rel[2]:+.4f})")
 
     if "gripper" in names and "moving_jaw_so101_v1" in names:
-        g = pos[names.index("gripper")]
-        j = pos[names.index("moving_jaw_so101_v1")]
-        mid = ((g + j) / 2.0 - g).tolist()
+        gi = names.index("gripper")
+        g, j, gq = pos[gi], pos[names.index("moving_jaw_so101_v1")], quat[gi]
+        delta_w = (g + j) / 2.0 - g
+        # OffsetCfg is expressed in the *target body's local frame*, so the world-frame
+        # delta must be rotated by the gripper's inverse orientation. Skipping this step
+        # silently plants the grasp frame wrong whenever the wrist is rotated.
+        local = quat_apply_inverse(gq.unsqueeze(0), delta_w.unsqueeze(0))[0].tolist()
+        dw = delta_w.tolist()
         print("-" * 60)
-        print(f"  jaw midpoint relative to 'gripper' body:")
-        print(f"    EE_GRASP_OFFSET = ({mid[0]:+.4f}, {mid[1]:+.4f}, {mid[2]:+.4f})")
+        print(f"  jaw midpoint - gripper origin, WORLD frame: "
+              f"({dw[0]:+.4f}, {dw[1]:+.4f}, {dw[2]:+.4f})")
+        print("  same vector in the gripper LOCAL frame -- this is the one to use:")
+        print(f"    EE_GRASP_OFFSET = ({local[0]:+.4f}, {local[1]:+.4f}, {local[2]:+.4f})")
     print("=" * 60 + "\n")
 
 

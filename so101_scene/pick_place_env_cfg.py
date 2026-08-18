@@ -46,10 +46,11 @@ GRIPPER_CLOSE = 0.0
 # silently never achieves a grasp.
 CUBE_SIZE = 0.025
 
-# Grasp-point offset from the ``gripper`` body origin, along the jaw. Tuned so the frame
-# sits between the jaws rather than at the wrist; re-measure with scripts/measure_ee.py if
-# the asset changes.
-EE_GRASP_OFFSET = (0.0, -0.02, 0.0)
+# Grasp-point offset from the ``gripper`` body origin to the midpoint between the jaws,
+# expressed in the gripper's LOCAL frame (which is what OffsetCfg wants). Measured with
+# scripts/measure_ee.py, not guessed -- the world-frame delta is (+0.0094, -0.0125,
+# +0.0091), so using it directly would put the grasp frame on the wrong axis.
+EE_GRASP_OFFSET = (0.0101, 0.0094, -0.0117)
 
 
 
