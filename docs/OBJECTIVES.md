@@ -105,7 +105,7 @@ expensive thing to debug than a config error.
 
 ## What it looks like
 
-![the objective running](objective_demo.mp4)
+![the objective running](objective_demo.gif)
 
 The policy picking the cube and carrying it to a goal sampled from
 `place[random(0.20, 0.0, 0.12, r0.06)]`. The goal moves between episodes because the region is a

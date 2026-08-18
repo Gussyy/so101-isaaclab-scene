@@ -6,6 +6,14 @@ checkpoint, a teleop device, a policy server in another process — is set in th
 
 Tested on Isaac Sim 6.0.1 / Isaac Lab 3.0, Windows 11, RTX 4070 Ti.
 
+## How to use it, in 69 seconds
+
+![install, config, objective grammar, teleop and the policy socket](docs/tutorial.gif)
+
+Every frame is real command output, captured by [`scripts/make_tutorial.py`](scripts/make_tutorial.py)
+rather than typed by hand — re-run it and the tutorial re-records itself. Sharper copy:
+[`docs/tutorial.mp4`](docs/tutorial.mp4) (720p).
+
 For a worked example of driving the env with an RL policy, see [`experiment/`](experiment/).
 
 ## Install
