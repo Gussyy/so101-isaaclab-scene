@@ -1,0 +1,543 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.3"
+    }
+    defaultPrim = "tn__SOARM101FULL_yH9"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpimvc860i/SO-ARM101-FULL.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_SO-ARM101-FULL_i7xj5m_e/usdex_SO-ARM101-FULL/SO-ARM101-FULL.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_SO-ARM101-FULL_i7xj5m_e/temp_SO-ARM101-FULL/SO-ARM101-FULL.usd
+
+
+Generated from Composed Stage of root layer /home/whaly/omni-kin_ws/so101-isaaclab-scene/robot_description/IsaacAssets/SO-ARM101-FULL/payloads/base.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    subLayers = [
+        @./robot.usda@
+    ]
+    upAxis = "Z"
+)
+
+def Xform "tn__SOARM101FULL_yH9" (
+    prepend apiSchemas = ["GeomModelAPI"]
+    assetInfo = {
+        string name = "SO-ARM101-FULL"
+    }
+    displayName = "SO-ARM101-FULL"
+    kind = "component"
+)
+{
+    float3[] extentsHint = [(-0.030982872, -0.06808064, -0.0024002623), (0.43269786, 0.067483105, 0.26969463), (3.4028235e38, 3.4028235e38, 3.4028235e38), (-3.4028235e38, -3.4028235e38, -3.4028235e38), (3.4028235e38, 3.4028235e38, 3.4028235e38), (-3.4028235e38, -3.4028235e38, -3.4028235e38), (-0.030982872, -0.06808064, -0.0024002623), (0.43269786, 0.067483105, 0.26969463)]
+
+    def Scope "Materials"
+    {
+    }
+
+    def Scope "Geometry"
+    {
+        def Xform "base_link"
+        {
+            def Xform "base_motor_holder_so101_v1" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_motor_holder_so101_v1>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.00636471, -0.0000994414, -0.0024)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "base_so101_v2" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_so101_v2>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.00636471, -8.97657e-9, -0.0024)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "sts3215_03a_v1" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/sts3215_03a_v1>
+            )
+            {
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.0263353, -8.97657e-9, 0.0437)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "waveshare_mounting_plate_so101_v2" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/waveshare_mounting_plate_so101_v2>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.0309827, -0.000199441, 0.0474)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "shoulder_link"
+            {
+                quatf xformOp:orient = (-1.7605304e-12, -0.0000013267949, 1, 0.0000013267949)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.0388353, -8.97657e-9, 0.0624)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                def Xform "sts3215_03a_v1" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/sts3215_03a_v1>
+                )
+                {
+                    quatd xformOp:orient = (0.4999981523, 0.5, 0.5, -0.5000018477)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (-0.0303992, 0.000422241, -0.0417)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "motor_holder_so101_base_v1" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/motor_holder_so101_base_v1>
+                )
+                {
+                    quatd xformOp:orient = (0.4999981523, 0.5, -0.5, 0.5000018477)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (-0.0675992, -0.000177759, 0.0158499)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "rotation_pitch_so101_v1" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/rotation_pitch_so101_v1>
+                )
+                {
+                    quatd xformOp:orient = (0.7071054578, -0.7071080804, 0, 0)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0.0122008, 0.0000222413, 0.0464)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "upper_arm_link"
+                {
+                    quatf xformOp:orient = (-0.49999815, 0.5, 0.5, 0.50000185)
+                    float3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (-0.0303992, -0.0182778, -0.0542)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                    def Xform "sts3215_03a_v1" (
+                        instanceable = true
+                        prepend references = @./instances.usda@</Instances/sts3215_03a_v1>
+                    )
+                    {
+                        quatd xformOp:orient = (9.381839732e-7, -0.7071054578, 0.7071080804, -9.381873838e-7)
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (-0.11257, -0.0155, 0.0187)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                    }
+
+                    def Xform "upper_arm_so101_v1" (
+                        instanceable = true
+                        prepend references = @./instances.usda@</Instances/upper_arm_so101_v1>
+                    )
+                    {
+                        quatd xformOp:orient = (0.000001326794859, 1, 0, 0)
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (-0.065085, 0.012, 0.0182)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                    }
+
+                    def Xform "lower_arm_link"
+                    {
+                        quatf xformOp:orient = (0.70710546, 0, 0, 0.7071081)
+                        float3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (-0.11257, -0.028, 1.73763e-16)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                        def Xform "under_arm_so101_v1" (
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/under_arm_so101_v1>
+                        )
+                        {
+                            quatd xformOp:orient = (0.000001326794859, 1, 0, 0)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.0648499, -0.032, 0.0182)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+
+                        def Xform "motor_holder_so101_wrist_v1" (
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/motor_holder_so101_wrist_v1>
+                        )
+                        {
+                            quatd xformOp:orient = (0.000001326794859, -1, 0, 0)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.0648499, -0.032, 0.018)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+
+                        def Xform "sts3215_03a_v1" (
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/sts3215_03a_v1>
+                        )
+                        {
+                            quatd xformOp:orient = (0, 0.000001326794859, -1, 0.000001326794859)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.1224, 0.0052, 0.0187)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+
+                        def Xform "wrist_link"
+                        {
+                            quatf xformOp:orient = (-0.70710546, 0, 0, 0.7071081)
+                            float3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.1349, 0.0052, 3.62355e-17)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                            def Xform "sts3215_03a_no_horn_v1" (
+                                instanceable = true
+                                prepend references = @./instances.usda@</Instances/sts3215_03a_no_horn_v1>
+                            )
+                            {
+                                quatd xformOp:orient = (0.4999981523, 0.5, 0.5, -0.5000018477)
+                                double3 xformOp:scale = (1, 1, 1)
+                                double3 xformOp:translate = (8.32667e-17, -0.0424, 0.0306)
+                                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                            }
+
+                            def Xform "wrist_roll_pitch_so101_v2" (
+                                instanceable = true
+                                prepend references = @./instances.usda@</Instances/wrist_roll_pitch_so101_v2>
+                            )
+                            {
+                                quatd xformOp:orient = (0.4999981523, -0.5, -0.5, -0.5000018477)
+                                double3 xformOp:scale = (1, 1, 1)
+                                double3 xformOp:translate = (0, -0.028, 0.0181)
+                                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                            }
+
+                            def Xform "gripper_base"
+                            {
+                                quatf xformOp:orient = (-9.38184e-7, 0.7071081, -9.381874e-7, -0.70710546)
+                                float3 xformOp:scale = (1, 1, 1)
+                                double3 xformOp:translate = (0, -0.181, 0.018)
+                                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                                def Xform "base_visual" (
+                                    instanceable = true
+                                    prepend references = @./instances.usda@</Instances/base_visual>
+                                )
+                                {
+                                    quatd xformOp:orient = (1, 0, 0, 0)
+                                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                    double3 xformOp:translate = (0, 0, 0)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                }
+
+                                def Xform "gripper_gear"
+                                {
+                                    quatf xformOp:orient = (-0.003098641, -0.0030717165, 0.71017873, 0.7040079)
+                                    float3 xformOp:scale = (1, 1, 1)
+                                    double3 xformOp:translate = (0.0000668, -0.08255248999999999, 0.000048580000000000006)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                                    def Xform "gripper_gear_visual" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/gripper_gear_visual>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.7071067691, -0.7071067691, 0, 0)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (0.04096474969, -0.008207775486, -0.1737567172)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+
+                                    def Xform "gripper_gear_collision" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/gripper_gear_visual_1>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.7071067691, -0.7071067691, 0, 0)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (0.04096474969, -0.008207775486, -0.1737567172)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+                                }
+
+                                def Xform "arm_r"
+                                {
+                                    quatf xformOp:orient = (-0.5, 0.5, 0.5, -0.5)
+                                    float3 xformOp:scale = (1, 1, 1)
+                                    double3 xformOp:translate = (-0.05997742, -0.07481815, 0.023050579999999998)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                                    def Xform "arm_r_visual" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/arm_r_visual>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.5, 0.5, -0.5, 0.5)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (-0.2412686471, 0.02292512223, -0.06000000244)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+
+                                    def Xform "arm_r_collision" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/arm_r_visual_1>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.5, 0.5, -0.5, 0.5)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (-0.2412686471, 0.02292512223, -0.06000000244)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+                                }
+
+                                def Xform "arm_l"
+                                {
+                                    quatf xformOp:orient = (0.5, 0.5, 0.5, 0.5)
+                                    float3 xformOp:scale = (1, 1, 1)
+                                    double3 xformOp:translate = (0.060022580000000006, -0.07481815, -0.02304942)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                                    def Xform "arm_l_visual" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/arm_l_visual>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.5, -0.5, 0.5, 0.5)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (-0.2412686471, 0.02290837291, -0.05999999756)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+
+                                    def Xform "arm_l_collision" (
+                                        instanceable = true
+                                        prepend references = @./instances.usda@</Instances/arm_l_visual_1>
+                                    )
+                                    {
+                                        quatd xformOp:orient = (0.5, -0.5, 0.5, 0.5)
+                                        double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                        double3 xformOp:translate = (-0.2412686471, 0.02290837291, -0.05999999756)
+                                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                    }
+                                }
+
+                                def Xform "base_collision" (
+                                    instanceable = true
+                                    prepend references = @./instances.usda@</Instances/base_visual_1>
+                                )
+                                {
+                                    quatd xformOp:orient = (1, 0, 0, 0)
+                                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                                    double3 xformOp:translate = (0, 0, 0)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                                }
+
+                                def Xform "gripper_frame_link"
+                                {
+                                    quatf xformOp:orient = (0.0000013267949, 0, 1, 0)
+                                    float3 xformOp:scale = (1, 1, 1)
+                                    double3 xformOp:translate = (-0.0079, -0.000218121, -0.0981274)
+                                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                                    def Scope "origin"
+                                    {
+                                        custom string urdf:rpy = "0 -0 0"
+                                        custom string urdf:xyz = "0 0 0"
+                                    }
+                                }
+                            }
+
+                            def Xform "sts3215_03a_no_horn_v1_1" (
+                                displayName = "sts3215_03a_no_horn_v1"
+                                instanceable = true
+                                prepend references = @./instances.usda@</Instances/sts3215_03a_no_horn_v1_1>
+                            )
+                            {
+                                quatd xformOp:orient = (0.4999981523, 0.5, 0.5, -0.5000018477)
+                                double3 xformOp:scale = (1, 1, 1)
+                                double3 xformOp:translate = (8.32667e-17, -0.0424, 0.0306)
+                                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                            }
+
+                            def Xform "wrist_roll_pitch_so101_v2_1" (
+                                displayName = "wrist_roll_pitch_so101_v2"
+                                instanceable = true
+                                prepend references = @./instances.usda@</Instances/wrist_roll_pitch_so101_v2_1>
+                            )
+                            {
+                                quatd xformOp:orient = (0.4999981523, -0.5, -0.5, -0.5000018477)
+                                double3 xformOp:scale = (1, 1, 1)
+                                double3 xformOp:translate = (0, -0.028, 0.0181)
+                                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                            }
+                        }
+
+                        def Xform "under_arm_so101_v1_1" (
+                            displayName = "under_arm_so101_v1"
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/under_arm_so101_v1_1>
+                        )
+                        {
+                            quatd xformOp:orient = (0.000001326794859, 1, 0, 0)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.0648499, -0.032, 0.0182)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+
+                        def Xform "motor_holder_so101_wrist_v1_1" (
+                            displayName = "motor_holder_so101_wrist_v1"
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/motor_holder_so101_wrist_v1_1>
+                        )
+                        {
+                            quatd xformOp:orient = (0.000001326794859, -1, 0, 0)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.0648499, -0.032, 0.018)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+
+                        def Xform "sts3215_03a_v1_1" (
+                            displayName = "sts3215_03a_v1"
+                            instanceable = true
+                            prepend references = @./instances.usda@</Instances/sts3215_03a_v1_1>
+                        )
+                        {
+                            quatd xformOp:orient = (0, 0.000001326794859, -1, 0.000001326794859)
+                            double3 xformOp:scale = (1, 1, 1)
+                            double3 xformOp:translate = (-0.1224, 0.0052, 0.0187)
+                            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                        }
+                    }
+
+                    def Xform "sts3215_03a_v1_1" (
+                        displayName = "sts3215_03a_v1"
+                        instanceable = true
+                        prepend references = @./instances.usda@</Instances/sts3215_03a_v1_1>
+                    )
+                    {
+                        quatd xformOp:orient = (9.381839732e-7, -0.7071054578, 0.7071080804, -9.381873838e-7)
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (-0.11257, -0.0155, 0.0187)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                    }
+
+                    def Xform "upper_arm_so101_v1_1" (
+                        displayName = "upper_arm_so101_v1"
+                        instanceable = true
+                        prepend references = @./instances.usda@</Instances/upper_arm_so101_v1_1>
+                    )
+                    {
+                        quatd xformOp:orient = (0.000001326794859, 1, 0, 0)
+                        double3 xformOp:scale = (1, 1, 1)
+                        double3 xformOp:translate = (-0.065085, 0.012, 0.0182)
+                        uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                    }
+                }
+
+                def Xform "sts3215_03a_v1_1" (
+                    displayName = "sts3215_03a_v1"
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/sts3215_03a_v1_1>
+                )
+                {
+                    quatd xformOp:orient = (0.4999981523, 0.5, 0.5, -0.5000018477)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (-0.0303992, 0.000422241, -0.0417)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "motor_holder_so101_base_v1_1" (
+                    displayName = "motor_holder_so101_base_v1"
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/motor_holder_so101_base_v1_1>
+                )
+                {
+                    quatd xformOp:orient = (0.4999981523, 0.5, -0.5, 0.5000018477)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (-0.0675992, -0.000177759, 0.0158499)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "rotation_pitch_so101_v1_1" (
+                    displayName = "rotation_pitch_so101_v1"
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/rotation_pitch_so101_v1_1>
+                )
+                {
+                    quatd xformOp:orient = (0.7071054578, -0.7071080804, 0, 0)
+                    double3 xformOp:scale = (1, 1, 1)
+                    double3 xformOp:translate = (0.0122008, 0.0000222413, 0.0464)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+            }
+
+            def Xform "base_motor_holder_so101_v1_1" (
+                displayName = "base_motor_holder_so101_v1"
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_motor_holder_so101_v1_1>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.00636471, -0.0000994414, -0.0024)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "base_so101_v2_1" (
+                displayName = "base_so101_v2"
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_so101_v2_1>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.00636471, -8.97657e-9, -0.0024)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "sts3215_03a_v1_1" (
+                displayName = "sts3215_03a_v1"
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/sts3215_03a_v1_1>
+            )
+            {
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.0263353, -8.97657e-9, 0.0437)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "waveshare_mounting_plate_so101_v2_1" (
+                displayName = "waveshare_mounting_plate_so101_v2"
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/waveshare_mounting_plate_so101_v2_1>
+            )
+            {
+                quatd xformOp:orient = (0.4999981523, 0.5, 0.5000018477, 0.5)
+                double3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.0309827, -0.000199441, 0.0474)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+        }
+    }
+
+    def Scope "Physics"
+    {
+    }
+
+    def Scope "VisualMaterials"
+    {
+    }
+}
+

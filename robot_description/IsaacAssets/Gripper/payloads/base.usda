@@ -1,0 +1,155 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.3"
+    }
+    defaultPrim = "Gripper"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpx_29kr1u/Gripper.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_Gripper_pm5r98sq/usdex_Gripper/Gripper.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_Gripper_pm5r98sq/temp_Gripper/Gripper.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    subLayers = [
+        @./robot.usda@
+    ]
+    upAxis = "Z"
+)
+
+def Xform "Gripper" (
+    prepend apiSchemas = ["GeomModelAPI"]
+    assetInfo = {
+        string name = "Gripper"
+    }
+    kind = "component"
+)
+{
+    float3[] extentsHint = [(-0.06775879, -0.12450001, -0.030199422), (0.06780396, 0.019563213, 0.035323877), (3.4028235e38, 3.4028235e38, 3.4028235e38), (-3.4028235e38, -3.4028235e38, -3.4028235e38), (3.4028235e38, 3.4028235e38, 3.4028235e38), (-3.4028235e38, -3.4028235e38, -3.4028235e38), (-0.06775879, -0.12450001, -0.030199422), (0.06780396, 0.019563213, 0.035323877)]
+
+    def Scope "Geometry"
+    {
+        def Xform "base"
+        {
+            def Xform "base_visual" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_visual>
+            )
+            {
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "base_collision" (
+                instanceable = true
+                prepend references = @./instances.usda@</Instances/base_visual_1>
+            )
+            {
+                quatd xformOp:orient = (1, 0, 0, 0)
+                double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                double3 xformOp:translate = (0, 0, 0)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+            }
+
+            def Xform "gripper_gear"
+            {
+                quatf xformOp:orient = (-0.003098641, -0.0030717165, 0.71017873, 0.7040079)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.0000668, -0.08255248999999999, 0.000048580000000000006)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                def Xform "gripper_gear_visual" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/gripper_gear_visual>
+                )
+                {
+                    quatd xformOp:orient = (0.7071067691, -0.7071067691, 0, 0)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (0.04096474969, -0.008207775486, -0.1737567172)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "gripper_gear_collision" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/gripper_gear_visual_1>
+                )
+                {
+                    quatd xformOp:orient = (0.7071067691, -0.7071067691, 0, 0)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (0.04096474969, -0.008207775486, -0.1737567172)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+            }
+
+            def Xform "arm_r"
+            {
+                quatf xformOp:orient = (-0.5, 0.5, 0.5, -0.5)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (-0.05997742, -0.07481815, 0.023050579999999998)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                def Xform "arm_r_visual" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/arm_r_visual>
+                )
+                {
+                    quatd xformOp:orient = (0.5, 0.5, -0.5, 0.5)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (-0.2412686471, 0.02292512223, -0.06000000244)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "arm_r_collision" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/arm_r_visual_1>
+                )
+                {
+                    quatd xformOp:orient = (0.5, 0.5, -0.5, 0.5)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (-0.2412686471, 0.02292512223, -0.06000000244)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+            }
+
+            def Xform "arm_l"
+            {
+                quatf xformOp:orient = (0.5, 0.5, 0.5, 0.5)
+                float3 xformOp:scale = (1, 1, 1)
+                double3 xformOp:translate = (0.060022580000000006, -0.07481815, -0.02304942)
+                uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+
+                def Xform "arm_l_visual" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/arm_l_visual>
+                )
+                {
+                    quatd xformOp:orient = (0.5, -0.5, 0.5, 0.5)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (-0.2412686471, 0.02290837291, -0.05999999756)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+
+                def Xform "arm_l_collision" (
+                    instanceable = true
+                    prepend references = @./instances.usda@</Instances/arm_l_visual_1>
+                )
+                {
+                    quatd xformOp:orient = (0.5, -0.5, 0.5, 0.5)
+                    double3 xformOp:scale = (0.001000000047, 0.001000000047, 0.001000000047)
+                    double3 xformOp:translate = (-0.2412686471, 0.02290837291, -0.05999999756)
+                    uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:orient", "xformOp:scale"]
+                }
+            }
+        }
+    }
+
+    def Scope "Physics"
+    {
+    }
+}
+

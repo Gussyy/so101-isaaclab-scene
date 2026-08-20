@@ -1,0 +1,144 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.3"
+    }
+    defaultPrim = "Gripper"
+    doc = """Generated from Composed Stage of root layer /tmp/tmpx_29kr1u/Gripper.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_Gripper_pm5r98sq/usdex_Gripper/Gripper.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_Gripper_pm5r98sq/temp_Gripper/Gripper.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+over "Gripper"
+{
+    over "Geometry"
+    {
+        over "base" (
+            prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsArticulationRootAPI", "NewtonArticulationRootAPI", "PhysicsMassAPI"]
+        )
+        {
+            bool newton:selfCollisionEnabled = 0
+            point3f physics:centerOfMass = (0.000107799104, -0.09520816, 0.007478071)
+            float3 physics:diagonalInertia = (0.00005103819, 0.00006046444, 0.00006508752)
+            float physics:mass = 0.10461305
+            quatf physics:principalAxes = (0.99768984, 0.0678975, 0.0018517313, 0.0012136472)
+
+            over "gripper_gear" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                point3f physics:centerOfMass = (1.6738794e-9, 9.65503e-7, 0.004039938)
+                float3 physics:diagonalInertia = (5.5902666e-7, 5.5903024e-7, 8.85623e-7)
+                float physics:mass = 0.017747246
+                quatf physics:principalAxes = (1, -0.00016638728, 0.000007512483, 1.2499817e-9)
+            }
+
+            over "arm_r" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                point3f physics:centerOfMass = (0.032640032, 0.02115559, -0.0091384)
+                float3 physics:diagonalInertia = (0.000007361121, 0.000019524343, 0.00002154446)
+                float physics:mass = 0.026667753
+                quatf physics:principalAxes = (0.9363756, -0.34569424, 0.0024675312, -0.060746156)
+            }
+
+            over "arm_l" (
+                prepend apiSchemas = ["PhysicsRigidBodyAPI", "PhysicsMassAPI"]
+            )
+            {
+                point3f physics:centerOfMass = (0.032640032, 0.021155592, -0.009138394)
+                float3 physics:diagonalInertia = (0.000007361121, 0.000019524343, 0.00002154446)
+                float physics:mass = 0.026667753
+                quatf physics:principalAxes = (0.9363756, -0.34569424, 0.0024675312, -0.060746156)
+            }
+        }
+    }
+
+    over "Physics"
+    {
+        def PhysicsRevoluteJoint "base_jaw_joint" (
+            prepend apiSchemas = ["PhysicsDriveAPI:angular", "PhysicsJointStateAPI:angular"]
+        )
+        {
+            float drive:angular:physics:maxForce = 1000000
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </Gripper/Geometry/base>
+            custom rel physics:body1
+            prepend rel physics:body1 = </Gripper/Geometry/base/gripper_gear>
+            point3f physics:localPos0 = (0.0000668, -0.08255249, 0.00004858)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (-0.003098641, -0.0030717165, 0.71017873, 0.7040079)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = 0
+            float physics:upperLimit = 179.90875
+            custom float urdf:limit:effort = 1000000
+            custom float urdf:limit:velocity = 1000000
+        }
+
+        def PhysicsPrismaticJoint "base_gripper_right_joint" (
+            prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:maxForce = 1000000
+            float newton:mimicCoef1 = -0.013721
+            rel newton:mimicJoint = </Gripper/Physics/base_jaw_joint>
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </Gripper/Geometry/base>
+            custom rel physics:body1
+            prepend rel physics:body1 = </Gripper/Geometry/base/arm_r>
+            point3f physics:localPos0 = (-0.05997742, -0.07481815, 0.02305058)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.5, -0.5, -0.5, 0.5)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -0.044
+            float physics:upperLimit = 0
+            custom float urdf:limit:effort = 1000000
+            custom float urdf:limit:velocity = 1000000
+        }
+
+        def PhysicsPrismaticJoint "base_gripper_left_joint" (
+            prepend apiSchemas = ["NewtonMimicAPI", "PhysicsDriveAPI:linear", "PhysicsJointStateAPI:linear"]
+        )
+        {
+            float drive:linear:physics:maxForce = 1000000
+            rel newton:mimicJoint = </Gripper/Physics/base_gripper_right_joint>
+            uniform token physics:axis = "Z"
+            custom rel physics:body0
+            prepend rel physics:body0 = </Gripper/Geometry/base>
+            custom rel physics:body1
+            prepend rel physics:body1 = </Gripper/Geometry/base/arm_l>
+            point3f physics:localPos0 = (0.06002258, -0.07481815, -0.02304942)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (0.5, 0.5, 0.5, 0.5)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+            float physics:lowerLimit = -0.044
+            float physics:upperLimit = 0
+            custom float urdf:limit:effort = 1000000
+            custom float urdf:limit:velocity = 1000000
+        }
+
+        def PhysicsFixedJoint "root_joint"
+        {
+            custom rel physics:body0
+            prepend rel physics:body0 = </Gripper>
+            custom rel physics:body1
+            prepend rel physics:body1 = </Gripper/Geometry/base>
+            point3f physics:localPos0 = (0, 0, 0)
+            point3f physics:localPos1 = (0, 0, 0)
+            quatf physics:localRot0 = (1, 0, 0, 0)
+            quatf physics:localRot1 = (1, 0, 0, 0)
+        }
+    }
+}
+

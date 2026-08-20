@@ -1,0 +1,228 @@
+#usda 1.0
+(
+    customLayerData = {
+        string creator = "URDF USD Converter v0.1.3"
+    }
+    doc = """Generated from Composed Stage of root layer /tmp/tmplqs5rorz/SO-ARM101-OMNI-KIN.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_SO-ARM101-OMNI-KIN_roabtxo3/usdex_SO-ARM101-OMNI-KIN/SO-ARM101-OMNI-KIN.usdc
+
+
+Generated from Composed Stage of root layer /tmp/urdf_import_SO-ARM101-OMNI-KIN_roabtxo3/temp_SO-ARM101-OMNI-KIN/SO-ARM101-OMNI-KIN.usd
+"""
+    kilogramsPerUnit = 1
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Scope "Instances"
+{
+    def Xform "base_visual" (
+        prepend references = @./geometries.usd@</Geometries/base_visual>
+    )
+    {
+        over "base_visual"
+        {
+            custom string urdf:name = "base_visual"
+        }
+    }
+
+    def Xform "base_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/base_visual>
+    )
+    {
+        over "base_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "shoulder_visual" (
+        prepend references = @./geometries.usd@</Geometries/shoulder_visual>
+    )
+    {
+        over "shoulder_visual"
+        {
+            custom string urdf:name = "shoulder_visual"
+        }
+    }
+
+    def Xform "shoulder_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/shoulder_visual>
+    )
+    {
+        over "shoulder_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "upper_arm_visual" (
+        prepend references = @./geometries.usd@</Geometries/upper_arm_visual>
+    )
+    {
+        over "upper_arm_visual"
+        {
+            custom string urdf:name = "upper_arm_visual"
+        }
+    }
+
+    def Xform "upper_arm_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/upper_arm_visual>
+    )
+    {
+        over "upper_arm_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "lower_arm_visual" (
+        prepend references = @./geometries.usd@</Geometries/lower_arm_visual>
+    )
+    {
+        over "lower_arm_visual"
+        {
+            custom string urdf:name = "lower_arm_visual"
+        }
+    }
+
+    def Xform "lower_arm_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/lower_arm_visual>
+    )
+    {
+        over "lower_arm_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "wrist_visual" (
+        prepend references = @./geometries.usd@</Geometries/wrist_visual>
+    )
+    {
+        over "wrist_visual"
+        {
+            custom string urdf:name = "wrist_visual"
+        }
+    }
+
+    def Xform "wrist_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/wrist_visual>
+    )
+    {
+        over "wrist_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "gripper_base_visual" (
+        prepend references = @./geometries.usd@</Geometries/gripper_base_visual>
+    )
+    {
+        over "gripper_base_visual"
+        {
+            custom string urdf:name = "gripper_base_visual"
+        }
+    }
+
+    def Xform "gripper_base_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/gripper_base_visual>
+    )
+    {
+        over "gripper_base_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "gripper_gear_visual" (
+        prepend references = @./geometries.usd@</Geometries/gripper_gear_visual>
+    )
+    {
+        over "gripper_gear_visual"
+        {
+            custom string urdf:name = "gripper_gear_visual"
+        }
+    }
+
+    def Xform "gripper_gear_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/gripper_gear_visual>
+    )
+    {
+        over "gripper_gear_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "arm_r_visual" (
+        prepend references = @./geometries.usd@</Geometries/arm_r_visual>
+    )
+    {
+        over "arm_r_visual"
+        {
+            custom string urdf:name = "arm_r_visual"
+        }
+    }
+
+    def Xform "arm_r_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/arm_r_visual>
+    )
+    {
+        over "arm_r_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+
+    def Xform "arm_l_visual" (
+        prepend references = @./geometries.usd@</Geometries/arm_l_visual>
+    )
+    {
+        over "arm_l_visual"
+        {
+            custom string urdf:name = "arm_l_visual"
+        }
+    }
+
+    def Xform "arm_l_visual_1" (
+        prepend references = @./geometries.usd@</Geometries/arm_l_visual>
+    )
+    {
+        over "arm_l_visual" (
+            apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
+        )
+        {
+            token physics:approximation = "convexHull"
+            token purpose = "guide"
+        }
+    }
+}
+
