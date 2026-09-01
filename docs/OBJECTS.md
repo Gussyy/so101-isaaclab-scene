@@ -22,6 +22,12 @@ objective:
 | `static_cuboid` | a prop that collides but never moves — pedestal, wall |
 | `usd` | any USD by path or URL |
 
+> **This page is about the `so101` single-jaw robot.** It does not apply to `so101_full`,
+> whose parallel gripper measures 56.2 mm closed and 128.6 mm open at the finger origins. Every
+> "too wide" verdict below is a statement about a 36.2 mm jaw. Re-run
+> `python scripts/measure_objects.py` and re-derive the table before trusting any of it for the
+> parallel gripper — most of these props probably become pickable.
+
 ## The catch: this arm has one jaw
 
 **There is no apple and no orange in Isaac Sim's YCB set.** There are 21 props, and of those,

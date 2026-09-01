@@ -58,6 +58,8 @@ anything with them -- but "should not" is not "does not", and a self-collision t
 clear now may not. Re-check success rate before trusting a policy trained this way.
 """
 
+from pathlib import Path
+
 from isaaclab.assets import ArticulationCfg
 
 from isaaclab_assets.robots.so101 import SO101_CFG
@@ -125,3 +127,90 @@ def so101_cfg(
             func=_override_approximation(collision_approximation, tuple(keep_decomposition)),
         )
     return cfg
+
+
+# ---------------------------------------------------------------- SO-ARM101-FULL
+#
+# A second robot: the same 5-DOF arm with a *parallel* gripper in place of the single jaw.
+# Committed to this repo under robot_description/, not streamed from NVIDIA's asset server.
+#
+# MEASURED by spawning it (scripts/measure_gripper.py):
+#
+#   joints (8)   shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll,
+#                base_jaw_joint, base_gripper_right_joint, base_gripper_left_joint
+#   bodies (10)  base_link, shoulder_link, upper_arm_link, lower_arm_link, wrist_link,
+#                gripper_base, gripper_gear, arm_r, arm_l, gripper_frame_link
+#
+#   finger separation, body origins:   q =  0.000 -> 128.6 mm   (open)
+#                                      q = -0.044 ->  56.2 mm   (closed)
+#
+# The two fingers are prismatic and move together. Contrast the single-jaw SO-101, whose jaw
+# bodies sat 36.2 mm apart at BOTH extremes -- that arm's grasp width was never measurable this
+# way, and its whole graspability table (docs/OBJECTS.md) is built on that 36.2 mm figure.
+#
+# The arm joints and their limits are identical to the single-jaw asset, so anything measured
+# about reach still holds. Only the gripper changed.
+SO101_FULL_USD = (
+    Path(__file__).resolve().parent.parent / "robot_description/IsaacAssets/SO-ARM101-FULL/SO-ARM101-FULL.usda"
+)
+
+# The grasp point is the midpoint between the two fingers, in gripper_base's LOCAL frame.
+# Measured, not guessed -- guessing this on the other arm cost a training run.
+SO101_FULL_BASE_BODY = "base_link"    # the single-jaw asset calls this "base"
+SO101_FULL_EE_BODY = "gripper_base"
+
+# Prim paths, relative to the robot root. This asset nests its bodies as the kinematic chain --
+# base_link/shoulder_link/upper_arm_link/... -- where the streamed single-jaw asset is flat
+# (/Robot/base, /Robot/gripper). A FrameTransformer addresses prims, not body names, so it needs
+# the full path or it fails with "No matching rigid-body prims were found" for a path that never
+# appears in any config.
+SO101_FULL_CHAIN = ["base_link", "shoulder_link", "upper_arm_link", "lower_arm_link", "wrist_link"]
+SO101_FULL_BASE_PATH = "Geometry/" + SO101_FULL_CHAIN[0]
+SO101_FULL_EE_PATH = "Geometry/" + "/".join(SO101_FULL_CHAIN) + "/" + SO101_FULL_EE_BODY
+SO101_FULL_GRASP_OFFSET = (0.0, -0.0748, 0.0)
+SO101_FULL_ARM_JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
+SO101_FULL_FINGERS = ["base_gripper_left_joint", "base_gripper_right_joint"]
+# q = 0 is open, q = -0.044 is closed. Verified by measuring the separation at both extremes,
+# because the sign is not guessable from the URDF.
+SO101_FULL_OPEN = {j: 0.0 for j in SO101_FULL_FINGERS}
+SO101_FULL_CLOSE = {j: -0.044 for j in SO101_FULL_FINGERS}
+
+
+def so101_full_cfg(prim_path: str = "{ENV_REGEX_NS}/Robot") -> ArticulationCfg:
+    """SO-ARM101-FULL: the 5-DOF arm with the parallel gripper.
+
+    The URDF exports the gripper joints with ``effort=1e6, velocity=1e6`` -- placeholders, not
+    specifications. Real numbers are set here instead: the fingers weigh 27 g each and only have
+    to hold a light object, so the gains are sized for that rather than left unbounded.
+    """
+    from isaaclab.actuators import ImplicitActuatorCfg
+    import isaaclab.sim as sim_utils
+
+    if not SO101_FULL_USD.is_file():
+        raise FileNotFoundError(
+            f"SO-ARM101-FULL asset not found at {SO101_FULL_USD}. It lives in this repo under "
+            "robot_description/ -- check the working tree is complete."
+        )
+    return ArticulationCfg(
+        prim_path=prim_path,
+        spawn=sim_utils.UsdFileCfg(usd_path=SO101_FULL_USD.as_posix()),
+        init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),
+        actuators={
+            # Same gains as the single-jaw arm: identical joints, identical limits.
+            "arm": ImplicitActuatorCfg(
+                joint_names_expr=SO101_FULL_ARM_JOINTS,
+                effort_limit_sim=10.0, velocity_limit_sim=10.0, stiffness=17.8, damping=0.60,
+            ),
+            # Prismatic: stiffness is N/m here, not N.m/rad, so the arm's 17.8 would be limp.
+            "fingers": ImplicitActuatorCfg(
+                joint_names_expr=SO101_FULL_FINGERS,
+                effort_limit_sim=50.0, velocity_limit_sim=1.0, stiffness=2000.0, damping=100.0,
+            ),
+            # The gear is driven by the fingers on the real robot; here it is a free joint that
+            # would flop, so hold it at zero rather than leave it unactuated.
+            "gear": ImplicitActuatorCfg(
+                joint_names_expr=["base_jaw_joint"],
+                effort_limit_sim=10.0, velocity_limit_sim=10.0, stiffness=50.0, damping=5.0,
+            ),
+        },
+    )

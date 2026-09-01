@@ -1,0 +1,77 @@
+# Pick-and-place with the SO-ARM101-FULL parallel gripper instead of the single jaw.
+#
+#   python scripts/run.py --config configs/pick_place_full.yaml --describe
+#   python scripts/run.py --config configs/pick_place_full.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  A DIFFERENT ROBOT, NOT A NEW VERSION OF THE SAME ONE
+#  Asset: robot_description/IsaacAssets/SO-ARM101-FULL -- committed here, not streamed.
+#
+#  Same 5 arm joints, identical limits, so everything measured about reach still holds
+#  (docs/workspace.png, docs/joint_range.txt). The gripper is what changed:
+#
+#                        single jaw (so101)        parallel (so101_full)
+#    gripper joints      gripper                   base_gripper_left/right_joint
+#                        1 revolute                2 prismatic, moving together
+#    plus                                          base_jaw_joint (gear, held at 0)
+#    end-effector body   gripper                   gripper_base
+#    finger separation   36.2 mm at BOTH extremes  56.2 mm closed .. 128.6 mm open
+#                        (no measurable travel)
+#
+#  Both grip commands are still ONE action dimension -- BinaryJointPositionAction applies
+#  its command to every joint it names -- so the action space is unchanged at 6.
+#
+#  The shipped PPO checkpoint will LOAD (same action width) but it was trained against
+#  the single jaw and different end-effector kinematics, so it is not an expert here.
+#  Driven by `zero` below; use `keyboard` to try the gripper by hand.
+#
+#  docs/OBJECTS.md is written against the 36.2 mm single jaw and does NOT apply to this
+#  robot. Re-run scripts/measure_objects.py before trusting any of that table here.
+# =====================================================================================
+
+meta:
+  name: so101-full-pick-place
+  notes: New parallel-gripper robot. Nothing has been trained against it.
+
+task: pick_place
+
+scene:
+  num_envs: 4
+  env_spacing: 1.0
+  robot:
+    type: so101_full
+    # NO base yaw, where the single-jaw asset needs +90 degrees. Different asset, different
+    # zero pose. Measured with scripts/diagnose_scene.py, end-effector to cube at the start:
+    #
+    #   rot +90 (what so101 uses)   gripper at env (-0.000, +0.232, 0.116)   away from the cube
+    #   rot -90                     gripper at env (-0.000, -0.280, 0.058)   0.396 m away
+    #   rot   0 (this)              gripper at env (+0.280, -0.000, 0.058)   0.088 m away
+    #
+    # Worth measuring rather than reasoning about: I got the sign wrong twice by rotating the
+    # numbers on paper before checking them against a running scene.
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.46, 0.34, 0.28]
+      look_at: [0.17, 0.0, 0.13]
+      focal_length: 22.0
+
+sim:
+  episode_length_s: 60.0
+
+control:
+  # Holds the arm at its start pose and cycles the gripper, so the fingers are visibly doing
+  # something. Swap for `keyboard` to drive it by hand, or `rl_checkpoint` to watch the
+  # single-jaw policy fail to transfer.
+  source: gripper_cycle
+  period: 70
+  action_horizon: 1

@@ -48,6 +48,25 @@ def _so101(spec: dict[str, Any]) -> ArticulationCfg:
     return cfg
 
 
+@register_robot("so101_full")
+def _so101_full(spec: dict[str, Any]) -> ArticulationCfg:
+    """SO-ARM101-FULL: the same 5-DOF arm with a parallel gripper instead of the single jaw.
+
+    Selecting this changes what the task's end-effector *is*, so the builder also repoints the
+    ee_frame and the gripper action -- see :func:`simbridge.builder.apply_robot_wiring`. Naming a
+    robot in a config cannot silently leave the task addressing a body that no longer exists.
+    """
+    from so101_scene.tuning import so101_full_cfg
+
+    cfg = so101_full_cfg(spec.get("prim_path", "{ENV_REGEX_NS}/Robot"))
+    cfg.init_state = ArticulationCfg.InitialStateCfg(
+        pos=_pos(spec),
+        rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        joint_pos=dict(spec.get("joint_pos", {})),
+    )
+    return cfg
+
+
 # --------------------------------------------------------------- objects
 
 @register_object("cuboid")

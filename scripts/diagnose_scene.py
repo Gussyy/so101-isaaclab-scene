@@ -73,7 +73,13 @@ def main() -> None:
 
     base = robot.data.root_pos_w.torch[0] - origin
     bodies = robot.body_names
-    ee_i = bodies.index("gripper")
+    # Do not hardcode the end-effector name. so101 calls it "gripper"; so101_full calls it
+    # "gripper_base" and has no body called "gripper" at all, so assuming one crashes on a robot
+    # the config is perfectly entitled to name.
+    ee_name = next((n for n in ("gripper", "gripper_base") if n in bodies), None)
+    if ee_name is None:
+        raise SystemExit(f"no end-effector body found; robot has: {bodies}")
+    ee_i = bodies.index(ee_name)
     ee = robot.data.body_pos_w.torch[0, ee_i] - origin
     op = obj.data.root_pos_w.torch[0] - origin
 
@@ -81,7 +87,7 @@ def main() -> None:
     print(f"{args_cli.config or args_cli.task}  (env-local frame)")
     print("=" * 68)
     print(f"  robot base       ({base[0]:+.4f}, {base[1]:+.4f}, {base[2]:+.4f})")
-    print(f"  ee 'gripper'     ({ee[0]:+.4f}, {ee[1]:+.4f}, {ee[2]:+.4f})")
+    print(f"  ee {ee_name!r:<14} ({ee[0]:+.4f}, {ee[1]:+.4f}, {ee[2]:+.4f})")
     print(f"  object           ({op[0]:+.4f}, {op[1]:+.4f}, {op[2]:+.4f})")
     print(f"  |ee - object|    {torch.norm(ee - op).item():.4f} m   <-- reaching_object std is 0.04")
     print(f"  |base - object|  {torch.norm(base - op).item():.4f} m   <-- SO-101 reach is ~0.30 m")

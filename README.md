@@ -109,10 +109,10 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 
 | kind | names |
 |---|---|
-| robots | `so101` |
+| robots | `so101`, `so101_full` |
 | objects | `cuboid`, `ycb`, `static_cuboid`, `usd` |
 | cameras | `tiled` |
-| sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `zmq` |
+| sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `gripper_cycle`, `zmq` |
 
 Add your own:
 
@@ -193,6 +193,40 @@ arm folding into the table. In free space every joint reaches its full range.
 The sphere is a **maximum**, not the reachable set. The real envelope is a lopsided shell with a
 hole around the base, and only 27% of it can be approached from above — that's what
 [docs/workspace.png](docs/workspace.png) draws. Numbers: [docs/joint_range.txt](docs/joint_range.txt).
+
+## Robots
+
+Two, selected by `scene.robot.type`:
+
+| | gripper | end-effector body | opening |
+|---|---|---|---|
+| `so101` | single revolute jaw | `gripper` | 36.2 mm, no measurable travel |
+| `so101_full` | **two prismatic fingers** | `gripper_base` | **56.2 mm closed … 128.6 mm open** |
+
+`so101_full` is committed here under [`robot_description/`](robot_description/), not streamed
+from NVIDIA. Same 5 arm joints with identical limits, so everything measured about reach still
+holds — only the gripper differs.
+
+```bash
+python scripts/run.py --config configs/pick_place_full.yaml --steps 0 --viz kit
+```
+
+Swapping the robot swaps the task wiring with it — the end-effector frame, the grasp offset, the
+arm joint list and the gripper action are all repointed, because a task hardcodes body and joint
+names that the other robot does not have. Both grip commands stay **one** action dimension, so
+the action space is unchanged at 6.
+
+Three things this asset does differently, all measured rather than assumed:
+
+- **No base yaw.** `so101` needs +90°; this one needs none. At +90° its gripper starts 0.40 m
+  from the cube, at 0° it starts 0.088 m away.
+- **Nested prims.** Bodies are a kinematic chain (`base_link/shoulder_link/...`) where the
+  streamed asset is flat, so frame transformers need the full path.
+- **Placeholder limits.** The URDF exports the gripper joints with `effort=1e6, velocity=1e6`;
+  real gains are set in [`so101_scene/tuning.py`](so101_scene/tuning.py).
+
+**[docs/OBJECTS.md](docs/OBJECTS.md) does not apply to `so101_full`** — that table is derived
+from the 36.2 mm single jaw. Re-run `scripts/measure_objects.py` before trusting it here.
 
 ## Physics backends
 

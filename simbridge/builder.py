@@ -269,6 +269,64 @@ def physics_options(preset) -> dict[str, Any]:
     return out
 
 
+def apply_robot_wiring(env_cfg, robot_type: str) -> None:
+    """Repoint the task's end-effector and gripper action at the robot the config chose.
+
+    A task hardcodes what its end-effector is: ``pick_place`` builds an ``ee_frame`` on the body
+    named ``gripper`` with a measured grasp offset, and drives one revolute joint called
+    ``gripper``. Select a robot whose gripper is a pair of prismatic fingers and none of those
+    names exist any more -- the FrameTransformer fails to resolve, and the action manager
+    addresses a joint that is not there.
+
+    So swapping the robot has to swap the wiring with it. Everything here is measured, in
+    ``so101_scene.tuning``, not inferred from the URDF.
+    """
+    if robot_type != "so101_full":
+        return
+    from so101_scene.tuning import (
+        SO101_FULL_ARM_JOINTS,
+        SO101_FULL_BASE_PATH,
+        SO101_FULL_EE_PATH,
+        SO101_FULL_CLOSE,
+        SO101_FULL_EE_BODY,
+        SO101_FULL_GRASP_OFFSET,
+        SO101_FULL_OPEN,
+    )
+
+    ee = getattr(env_cfg.scene, "ee_frame", None)
+    if ee is not None and getattr(ee, "target_frames", None):
+        # Both ends of the transformer. The source is the robot's base body, which this asset
+        # calls base_link where the single-jaw one calls it base -- miss it and the sensor fails
+        # with "No matching rigid-body prims were found" for a path the config never mentions.
+        ee.prim_path = "{ENV_REGEX_NS}/Robot/" + SO101_FULL_BASE_PATH
+        ee.target_frames[0].prim_path = "{ENV_REGEX_NS}/Robot/" + SO101_FULL_EE_PATH
+        ee.target_frames[0].offset.pos = SO101_FULL_GRASP_OFFSET
+
+    actions = getattr(env_cfg, "actions", None)
+    arm = getattr(actions, "arm_action", None)
+    if arm is not None:
+        arm.joint_names = list(SO101_FULL_ARM_JOINTS)
+    grip = getattr(actions, "gripper_action", None)
+    if grip is not None:
+        # One action dimension still, driving both fingers together -- BinaryJointPositionAction
+        # applies its command to every joint it names.
+        grip.joint_names = list(SO101_FULL_OPEN)
+        grip.open_command_expr = dict(SO101_FULL_OPEN)
+        grip.close_command_expr = dict(SO101_FULL_CLOSE)
+
+    commands = getattr(env_cfg, "commands", None)
+    cmd = getattr(commands, "object_pose", None)
+    if cmd is not None:
+        cmd.body_name = SO101_FULL_EE_BODY
+
+    for term in ("joint_vel",):
+        rew = getattr(getattr(env_cfg, "rewards", None), term, None)
+        if rew is not None and "asset_cfg" in getattr(rew, "params", {}):
+            from isaaclab.managers import SceneEntityCfg
+
+            rew.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=list(SO101_FULL_ARM_JOINTS))
+
+
 def load_env_cfg(gym_id: str, device: str, num_envs: int, physics: str | None):
     """Load a task's env cfg, selecting a physics backend before the choice is thrown away.
 
@@ -342,6 +400,7 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
 
     if (robot := scene_spec.get("robot")) is not None:
         env_cfg.scene.robot = lookup(ROBOTS, robot["type"], "robot")(robot)
+        apply_robot_wiring(env_cfg, robot["type"])
 
     for name, spec in (scene_spec.get("objects") or {}).items():
         spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}
