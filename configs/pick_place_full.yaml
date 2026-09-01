@@ -50,6 +50,14 @@ scene:
     # Worth measuring rather than reasoning about: I got the sign wrong twice by rotating the
     # numbers on paper before checking them against a running scene.
     rot: [0.0, 0.0, 0.0, 1.0]
+    # The gripper, from the config. Omit the block and the measured defaults are used.
+    gripper:
+      open: 0.0            # finger travel is -0.044 .. 0.0; 0 is fully open
+      close: -0.044        # -0.044 is fully closed. A value outside that range is rejected.
+      stiffness: 2000.0    # N/m -- prismatic, so the arm's 17.8 N.m/rad would be limp here
+      damping: 100.0
+      effort: 50.0         # N. The URDF ships 1e6, which is a placeholder, not a spec.
+      velocity: 1.0        # m/s
     joint_pos:
       shoulder_pan: 0.0
       shoulder_lift: -0.6

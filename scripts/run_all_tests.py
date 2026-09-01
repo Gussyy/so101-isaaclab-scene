@@ -154,6 +154,63 @@ def test_physics_selection() -> None:
     record("an unknown backend name is refused", "REJECTED" in out and "NOT REJECTED" not in out, last)
 
 
+def test_gripper_config() -> None:
+    """Selecting so101_full must repoint the task wiring, and the gripper must be configurable.
+
+    A task hardcodes body and joint names. Naming a robot that has none of them has to move the
+    ee_frame and the gripper action with it, or the scene fails on a path no config mentions.
+    """
+    print("\nparallel gripper wiring and config")
+    src = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, '.')
+        import so101_scene  # noqa: F401
+        from simbridge.builder import build_env_cfg, load_config
+        from simbridge.registry import register_task
+
+        register_task("pick_place", "SO101-PickPlace-v0")
+        cfg = load_config("configs/pick_place_full.yaml")
+
+        env_cfg = build_env_cfg(cfg, device="cuda:0", num_envs=1)
+        grip = env_cfg.actions.gripper_action
+        if set(grip.joint_names) != {"base_gripper_left_joint", "base_gripper_right_joint"}:
+            print(f"WRONG JOINTS {grip.joint_names}")
+            raise SystemExit(1)
+        if "gripper_base" not in env_cfg.scene.ee_frame.target_frames[0].prim_path:
+            print("EE FRAME NOT REPOINTED")
+            raise SystemExit(1)
+        print("WIRED")
+
+        cfg["scene"]["robot"]["gripper"]["close"] = -0.022
+        half = build_env_cfg(cfg, device="cuda:0", num_envs=1).actions.gripper_action
+        print("CONFIGURED" if set(half.close_command_expr.values()) == {-0.022} else "NOT CONFIGURED")
+
+        cfg["scene"]["robot"]["gripper"]["close"] = -0.06
+        try:
+            build_env_cfg(cfg, device="cuda:0", num_envs=1)
+        except ValueError:
+            print("RANGE CHECKED")
+        else:
+            print("OUT OF RANGE ACCEPTED")
+
+        cfg["scene"]["robot"]["gripper"] = {"stifness": 1}
+        try:
+            build_env_cfg(cfg, device="cuda:0", num_envs=1)
+        except ValueError:
+            print("TYPO CHECKED")
+        else:
+            print("TYPO ACCEPTED")
+        """
+    )
+    code, out = sh([PY, "-c", src], timeout=300)
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    record("so101_full repoints the task wiring", code == 0 and "WIRED" in out, last)
+    record("gripper open/close come from the config", "CONFIGURED" in out and "NOT CONFIGURED" not in out, last)
+    record("travel outside the joint range is refused", "RANGE CHECKED" in out, last)
+    record("an unknown gripper key is refused", "TYPO CHECKED" in out, last)
+
+
 def test_registry() -> None:
     print("\nregistry")
     src = (
@@ -313,6 +370,7 @@ def main() -> None:
     test_configs()
     test_objective_grammar()
     test_physics_selection()
+    test_gripper_config()
     test_registry()
     test_scripts_help()
     test_zmq_roundtrip()

@@ -216,6 +216,32 @@ arm joint list and the gripper action are all repointed, because a task hardcode
 names that the other robot does not have. Both grip commands stay **one** action dimension, so
 the action space is unchanged at 6.
 
+The gripper is configured from YAML like everything else:
+
+```yaml
+scene:
+  robot:
+    type: so101_full
+    gripper:
+      open: 0.0            # finger travel is -0.044 .. 0.0
+      close: -0.044        # a partial close is just a smaller number
+      stiffness: 2000.0    # N/m -- prismatic, so the arm's 17.8 N.m/rad would be limp
+      damping: 100.0
+      effort: 50.0         # N. The URDF ships 1e6, a placeholder rather than a spec.
+      velocity: 1.0        # m/s
+```
+
+The value maps straight to how far the fingers close — measured in sim:
+
+| `close` | finger separation |
+|---|---|
+| `-0.044` | 56.3 mm |
+| `-0.022` | 89.0 mm |
+| `-0.010` | 110.2 mm |
+
+A value outside the joint's real travel is refused, naming the range, and an unknown key is
+refused with the list — the same treatment every other config key gets.
+
 Three things this asset does differently, all measured rather than assumed:
 
 - **No base yaw.** `so101` needs +90°; this one needs none. At +90° its gripper starts 0.40 m

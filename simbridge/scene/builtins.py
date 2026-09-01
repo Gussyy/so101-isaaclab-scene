@@ -58,7 +58,10 @@ def _so101_full(spec: dict[str, Any]) -> ArticulationCfg:
     """
     from so101_scene.tuning import so101_full_cfg
 
-    cfg = so101_full_cfg(spec.get("prim_path", "{ENV_REGEX_NS}/Robot"))
+    cfg = so101_full_cfg(
+        spec.get("prim_path", "{ENV_REGEX_NS}/Robot"),
+        gripper=spec.get("gripper"),
+    )
     cfg.init_state = ArticulationCfg.InitialStateCfg(
         pos=_pos(spec),
         rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),

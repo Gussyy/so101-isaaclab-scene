@@ -269,7 +269,12 @@ def physics_options(preset) -> dict[str, Any]:
     return out
 
 
-def apply_robot_wiring(env_cfg, robot_type: str) -> None:
+# What a `scene.robot.gripper` block may set. Rejected up front like every other config key --
+# a typo'd `stifness` that silently leaves the default is the bug this repo keeps re-learning.
+_GRIPPER_KEYS = {"open", "close", "stiffness", "damping", "effort", "velocity"}
+
+
+def apply_robot_wiring(env_cfg, robot_spec: dict[str, Any]) -> None:
     """Repoint the task's end-effector and gripper action at the robot the config chose.
 
     A task hardcodes what its end-effector is: ``pick_place`` builds an ``ee_frame`` on the body
@@ -281,16 +286,27 @@ def apply_robot_wiring(env_cfg, robot_type: str) -> None:
     So swapping the robot has to swap the wiring with it. Everything here is measured, in
     ``so101_scene.tuning``, not inferred from the URDF.
     """
+    robot_type = robot_spec.get("type")
+    grip_spec = robot_spec.get("gripper") or {}
+    _reject_unknown(grip_spec, _GRIPPER_KEYS, "scene.robot.gripper")
     if robot_type != "so101_full":
+        if grip_spec:
+            raise ValueError(
+                f"scene.robot.gripper is only supported for 'so101_full', not {robot_type!r}. "
+                "The single-jaw so101 drives one revolute joint; its open/close values live in "
+                "the task."
+            )
         return
     from so101_scene.tuning import (
         SO101_FULL_ARM_JOINTS,
         SO101_FULL_BASE_PATH,
-        SO101_FULL_EE_PATH,
         SO101_FULL_CLOSE,
         SO101_FULL_EE_BODY,
+        SO101_FULL_EE_PATH,
+        SO101_FULL_FINGERS,
         SO101_FULL_GRASP_OFFSET,
         SO101_FULL_OPEN,
+        SO101_FULL_TRAVEL,
     )
 
     ee = getattr(env_cfg.scene, "ee_frame", None)
@@ -310,9 +326,20 @@ def apply_robot_wiring(env_cfg, robot_type: str) -> None:
     if grip is not None:
         # One action dimension still, driving both fingers together -- BinaryJointPositionAction
         # applies its command to every joint it names.
-        grip.joint_names = list(SO101_FULL_OPEN)
-        grip.open_command_expr = dict(SO101_FULL_OPEN)
-        grip.close_command_expr = dict(SO101_FULL_CLOSE)
+        # Both fingers move together, and a config may say how far. Clamped to the joint's real
+        # travel: asking for -0.06 on a joint that stops at -0.044 does not open it further, it
+        # just means the commanded target is never reached and the fingers press forever.
+        opened = float(grip_spec.get("open", SO101_FULL_OPEN[SO101_FULL_FINGERS[0]]))
+        closed = float(grip_spec.get("close", SO101_FULL_CLOSE[SO101_FULL_FINGERS[0]]))
+        for label, v in (("open", opened), ("close", closed)):
+            if not (SO101_FULL_TRAVEL[0] - 1e-9) <= v <= (SO101_FULL_TRAVEL[1] + 1e-9):
+                raise ValueError(
+                    f"scene.robot.gripper.{label}={v} is outside the finger travel "
+                    f"{SO101_FULL_TRAVEL}; the joint cannot go there."
+                )
+        grip.joint_names = list(SO101_FULL_FINGERS)
+        grip.open_command_expr = {j: opened for j in SO101_FULL_FINGERS}
+        grip.close_command_expr = {j: closed for j in SO101_FULL_FINGERS}
 
     commands = getattr(env_cfg, "commands", None)
     cmd = getattr(commands, "object_pose", None)
@@ -400,7 +427,7 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
 
     if (robot := scene_spec.get("robot")) is not None:
         env_cfg.scene.robot = lookup(ROBOTS, robot["type"], "robot")(robot)
-        apply_robot_wiring(env_cfg, robot["type"])
+        apply_robot_wiring(env_cfg, robot)
 
     for name, spec in (scene_spec.get("objects") or {}).items():
         spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}

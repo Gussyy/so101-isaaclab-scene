@@ -172,17 +172,29 @@ SO101_FULL_ARM_JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_f
 SO101_FULL_FINGERS = ["base_gripper_left_joint", "base_gripper_right_joint"]
 # q = 0 is open, q = -0.044 is closed. Verified by measuring the separation at both extremes,
 # because the sign is not guessable from the URDF.
+# Measured travel of each prismatic finger, from the spawned articulation.
+SO101_FULL_TRAVEL = (-0.044, 0.0)
 SO101_FULL_OPEN = {j: 0.0 for j in SO101_FULL_FINGERS}
 SO101_FULL_CLOSE = {j: -0.044 for j in SO101_FULL_FINGERS}
 
 
-def so101_full_cfg(prim_path: str = "{ENV_REGEX_NS}/Robot") -> ArticulationCfg:
+def so101_full_cfg(
+    prim_path: str = "{ENV_REGEX_NS}/Robot",
+    gripper: dict | None = None,
+) -> ArticulationCfg:
     """SO-ARM101-FULL: the 5-DOF arm with the parallel gripper.
 
     The URDF exports the gripper joints with ``effort=1e6, velocity=1e6`` -- placeholders, not
     specifications. Real numbers are set here instead: the fingers weigh 27 g each and only have
     to hold a light object, so the gains are sized for that rather than left unbounded.
+
+    Args:
+        prim_path: Where to spawn it.
+        gripper: Optional overrides from ``scene.robot.gripper`` in a config -- ``stiffness``,
+            ``damping``, ``effort``, ``velocity``. Units are N/m and N for the prismatic
+            fingers, not N.m/rad, so the arm's own gains would be limp here.
     """
+    g = dict(gripper or {})
     from isaaclab.actuators import ImplicitActuatorCfg
     import isaaclab.sim as sim_utils
 
@@ -204,7 +216,10 @@ def so101_full_cfg(prim_path: str = "{ENV_REGEX_NS}/Robot") -> ArticulationCfg:
             # Prismatic: stiffness is N/m here, not N.m/rad, so the arm's 17.8 would be limp.
             "fingers": ImplicitActuatorCfg(
                 joint_names_expr=SO101_FULL_FINGERS,
-                effort_limit_sim=50.0, velocity_limit_sim=1.0, stiffness=2000.0, damping=100.0,
+                effort_limit_sim=float(g.get("effort", 50.0)),
+                velocity_limit_sim=float(g.get("velocity", 1.0)),
+                stiffness=float(g.get("stiffness", 2000.0)),
+                damping=float(g.get("damping", 100.0)),
             ),
             # The gear is driven by the fingers on the real robot; here it is a free joint that
             # would flop, so hold it at zero rather than leave it unactuated.
