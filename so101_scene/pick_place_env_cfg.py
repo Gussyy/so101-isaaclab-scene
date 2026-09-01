@@ -173,6 +173,24 @@ class PickPlacePhysicsCfg(PresetCfg):
                 CouplerEntryCfg(
                     name="soft",
                     solver_cfg=VBDSolverCfg(
+                        # Self-collision. Off by Isaac Lab's default, and a flat sheet does
+                        # not need it -- a garment does: a sleeve folded over the body is
+                        # exactly the contact this resolves. The radius must stay well under
+                        # the mesh's particle spacing or every particle contacts its own
+                        # neighbours; scripts/make_garment.py reports that spacing, and the
+                        # shipped 2,572-vertex shirt is 1.0 mm at its tightest,
+                        # 6.1 mm median, at scale 0.25.
+                        particle_enable_self_contact=True,
+                        # Both radii are WORLD metres, so they are compared against the mesh's
+                        # spacing AFTER `scale:`. The shipped shirt is 1.0 mm at its tightest
+                        # (scripts/make_garment.py prints it), hence 0.5 mm here: a radius above
+                        # the smallest edge makes every particle collide with its own neighbour.
+                        particle_self_contact_radius=0.0005,
+                        particle_self_contact_margin=0.0005,
+                        # And the belt to that pair of braces: never self-contact particles that
+                        # were already this close in the REST shape. Isaac Lab defaults it to 0.0,
+                        # which is what let a 6 mm-spaced garment tear itself apart in 60 steps.
+                        particle_rest_shape_contact_exclusion_radius=0.008,
                         iterations=10,
                         rigid_body_particle_contact_buffer_size=8192,
                     ),

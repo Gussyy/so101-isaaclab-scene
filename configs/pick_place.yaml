@@ -7,7 +7,7 @@ meta:
   name: so101-pick-place
   notes: >
     Baseline config. Cameras are declared but cost VRAM: measured 27k frames/s at 128px,
-    with 512 envs x 1 cam or 256 envs x 2 cams filling a 12 GB card (docs/bench_camera.txt).
+    with 512 envs x 1 cam or 256 envs x 2 cams filling a 12 GB card (experiment/docs/bench_camera.txt).
 
 task: pick_place
 

@@ -62,6 +62,7 @@ measured width. Keys: `name`, `pos`, `rot`, `scale`, `mass`, `static`, `static_f
 | `lehome_kitchen_cut.yaml` | `loft_cut_bi` | the board, tomato and knife | **the cutting** |
 | `lehome_washroom_wipe.yaml` | `loft_wipe` | the sponge and towel | particle cloth, the stain, the wipe check |
 | `lehome_livingroom_cup.yaml` | `loft_water` | the glassware | **the water** |
+| `lehome_bedroom_shirt.yaml` | `garment_bi` | the garment, simulating and grippable | the second arm, **the folding** |
 
 Each config's header says what it is not. A task called "cut" that quietly does not cut is worse
 than one that says so.
@@ -85,13 +86,43 @@ were downloaded from their published release and the task *ideas* re-implemented
 **Bimanual.** Six of LeHome's seven tasks run two SO-101 arms (`*_bi`). This repo has one, and a
 second arm is not a config change — it is a second action space, a second IK chain, and a reward
 structure that has to coordinate them. `loft_wipe` and `loft_water` are their single-arm tasks
-and are the two adapted most faithfully.
+and are the two adapted most faithfully. **Folding is the task this actually blocks**: the
+garment itself now simulates here (below), but folding a shirt one-handed is not a smaller
+version of LeHome's task, it is a different one.
 
 **PhysX particle cloth and fluid.** LeHome's `GarmentObject` and `FluidObject` build PhysX
 particle systems. This repo's deformable path is Newton's VBD solver — a different solver with
-different assets and different parameters (see [PHYSICS.md](PHYSICS.md)). For cloth that actually
-simulates here, use `type: cloth`, not a LeHome towel. There is no fluid at all: Newton ships
-`SolverImplicitMPM`, Isaac Lab's `NewtonCfg` does not expose it, and nothing in this repo pours.
+different assets and different parameters (see [PHYSICS.md](PHYSICS.md)). The *garment mesh* does
+cross over (below); the particle machinery around it does not, so a LeHome towel is scenery and
+`type: cloth` is the real thing. There is no fluid at all: Newton ships `SolverImplicitMPM`,
+Isaac Lab's `NewtonCfg` does not expose it, and nothing in this repo pours.
+
+## The shirt
+
+```bash
+python scripts/run.py --config configs/lehome_bedroom_shirt.yaml --steps 0 --viz kit
+```
+
+![the shirt, simulated](lehome/shirt.png)
+
+LeHome's shirt runs here as Newton VBD cloth, with self-collision on. The asset is committed at
+`assets/garment/shirt.usd`, so that config needs no download; `scripts/make_garment.py`
+regenerates it from the LeHome source at any particle spacing.
+
+It is a garment that simulates and can be gripped. It is **not** LeHome's folding task — see
+Bimanual above.
+
+Three findings, all measured, in [PHYSICS.md](PHYSICS.md):
+
+- the source mesh **diverges at step 7** — 14,746 vertices means 2.4 mm triangles against a 2 mm
+  particle radius, so the particles start out overlapping;
+- **quadric decimation cannot self-collide.** At the same vertex count it leaves edges spanning
+  0.21–35.5 mm (170x); voxel clustering gives 1.04–11.07 mm (11x). A self-contact radius has to sit
+  under the smallest edge, and at 0.21 mm there isn't one;
+- self-collision still tore the shirt apart in 60 steps until
+  `particle_rest_shape_contact_exclusion_radius` was raised off its **0.0** default.
+
+Shipped at 6 mm spacing: 2,572 particles, 24.8 steps/s at 1 environment.
 
 **Mesh cutting.** `loft_cut_bi` rebuilds the tomato mesh at the knife plane
 (`utils/cutMeshNode.py`). There is no mesh surgery here.

@@ -13,3 +13,5 @@ outputs/
 docs/camera_views/
 datasets/
 assets/lehome/
+assets/garment/shirt_*mm.usd
+.hand/

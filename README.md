@@ -110,7 +110,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | kind | names |
 |---|---|
 | robots | `so101`, `so101_full` |
-| objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `cloth`, `soft_body` |
+| objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `cloth`, `soft_body`, `light` |
 | cameras | `tiled` |
 | sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `gripper_cycle`, `zmq` |
 
@@ -391,6 +391,7 @@ python scripts/run.py --config configs/lehome_kitchen_burger.yaml --steps 0 --vi
 | `lehome_kitchen_cut.yaml` | `loft_cut_bi` | [mp4](docs/lehome/lehome_kitchen_cut.mp4) |
 | `lehome_washroom_wipe.yaml` | `loft_wipe` | [mp4](docs/lehome/lehome_washroom_wipe.mp4) |
 | `lehome_livingroom_cup.yaml` | `loft_water` | [mp4](docs/lehome/lehome_livingroom_cup.mp4) |
+| `lehome_bedroom_shirt.yaml` | `garment_bi` | [mp4](docs/lehome/lehome_bedroom_shirt.mp4) |
 
 ```yaml
 scene:
@@ -418,9 +419,37 @@ Two things the adaptation had to fix, both of which are the quiet kind:
   its origin 51 mm up, so `lifting_object` pays out in full at step 0 with the arm parked. New
   config key: `sim.lift_height`.
 
+### The shirt
+
+LeHome's garment runs here as Newton VBD cloth with self-collision, committed at
+`assets/garment/shirt.usd` so it needs no download:
+
+```bash
+python scripts/run.py --config configs/lehome_bedroom_shirt.yaml --steps 0 --viz kit
+```
+
+![LeHome's shirt settled on the table beside the arm, collar and sleeve folded](docs/lehome/shirt.png)
+
+It is a garment that simulates and can be gripped — **not** LeHome's folding task, which is
+bimanual. Three measured findings got it there, and the middle one is the interesting one:
+
+- the source mesh **diverges at step 7**: 14,746 vertices means 2.4 mm triangles against a 2 mm
+  particle radius, so the particles start out overlapping;
+- **how you reduce the mesh matters more than how far.** At the same ~3000 vertices, quadric
+  decimation leaves edges from 0.21 to 35.5 mm (170x) and voxel clustering leaves 1.0 to 11.1 mm
+  (11x). Self-contact radius has to sit under the *smallest* edge, so the quadric mesh can never
+  self-collide. `scripts/make_garment.py` therefore uses clustering, and its knob is particle
+  spacing rather than vertex count;
+- self-collision still tore the shirt apart by step 60 until
+  `particle_rest_shape_contact_exclusion_radius` came off its `0.0` default.
+
+Shipped at 6 mm spacing: 2,572 particles, 24.8 steps/s at 1 env. Retune with
+`python scripts/make_garment.py --spacing 4 --out assets/garment/shirt_4mm.usd` — plain
+`--spacing` overwrites the committed `shirt.usd`.
+
 What did *not* come across — the second arm, PhysX particle cloth, the fluid, the mesh cutting,
 the 4.8 GB apartment — and why, is in **[docs/LEHOME.md](docs/LEHOME.md)**. Raw measurements:
-[docs/lehome_objects.txt](docs/lehome_objects.txt).
+[docs/lehome_objects.txt](docs/lehome_objects.txt) and [docs/PHYSICS.md](docs/PHYSICS.md).
 
 ## LeRobot
 

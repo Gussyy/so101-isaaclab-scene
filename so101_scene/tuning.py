@@ -169,6 +169,12 @@ SO101_FULL_BASE_PATH = "Geometry/" + SO101_FULL_CHAIN[0]
 SO101_FULL_EE_PATH = "Geometry/" + "/".join(SO101_FULL_CHAIN) + "/" + SO101_FULL_EE_BODY
 SO101_FULL_GRASP_OFFSET = (0.0, -0.0748, 0.0)
 SO101_FULL_ARM_JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll"]
+# Bodies the cloth solver is allowed to feel, as leaf prim names. Deliberately short: every
+# entry costs contact work against every particle, every substep. The single-jaw robot's
+# equivalent list is hardcoded in PickPlacePhysicsCfg because it is that task's default; naming
+# a different robot has to bring its own, or the coupler raises "matched no Newton bodies".
+SO101_FULL_CLOTH_BODIES = ("gripper_base", "arm_l", "arm_r")
+
 SO101_FULL_FINGERS = ["base_gripper_left_joint", "base_gripper_right_joint"]
 # q = 0 is open, q = -0.044 is closed. Verified by measuring the separation at both extremes,
 # because the sign is not guessable from the URDF.

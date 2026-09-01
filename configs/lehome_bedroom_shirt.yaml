@@ -1,0 +1,99 @@
+# LeHome's bedroom, one arm: a real shirt, simulated as Newton cloth with self-collision.
+#
+#   python scripts/run.py --config configs/lehome_bedroom_shirt.yaml --steps 0 --viz kit
+#   python scripts/run.py --config configs/lehome_bedroom_shirt.yaml --set control.source=keyboard
+#
+# The shirt asset is committed (assets/garment/shirt.usd), so this config runs without the
+# 1.7 GB LeHome download. Regenerate or retune it with scripts/make_garment.py.
+#
+# =====================================================================================
+#  THIS IS NOT LeHome's FOLDING TASK
+#  `garment_bi` and `garment_fling_bi` are bimanual -- Left_Robot and Right_Robot -- on
+#  PhysX particle cloth. This repo has one arm and Newton's VBD solver. What is here is
+#  the garment, simulating, grippable, with self-collision on. Folding is a task on top
+#  of that, and it wants two arms.
+#
+#  WHAT IT TOOK, all measured (docs/PHYSICS.md has the table)
+#
+#  1. The source mesh diverges at step 7. 14,746 verts; at this scale its triangles are
+#     2.4 mm across against a 2 mm particle radius, so the particles start overlapping.
+#
+#  2. Quadric decimation to 3000 verts is stable but CANNOT self-collide: it leaves edges
+#     from 0.21 mm to 35.5 mm, and the self-contact radius has to sit under the smallest
+#     one. Voxel clustering at the same vertex count gives 1.04 .. 11.07 mm -- an 11x
+#     spread instead of 170x. That is the whole reason make_garment.py uses open3d, and the
+#     reason its knob is spacing rather than vertex count.
+#
+#  3. Self-contact still tore the shirt apart in 60 steps until
+#     `particle_rest_shape_contact_exclusion_radius` was raised off its 0.0 default.
+#     Neighbours that were always 6 mm apart were colliding with each other.
+#
+#  MEASURED HERE, 1 env, 150 steps, parallel gripper, self-contact on:
+#
+#     spacing   particles   steps/s
+#     4 mm         5314       20.8
+#     6 mm         2572       24.8      <- this config
+#     9 mm         1207       26.6
+#
+#  RENDERING IS THE EXPENSIVE PART, AND NOT FOR THE REASON YOU'D GUESS. Headless this
+#  runs at 24.8 steps/s; add the camera below and it is 1.9. That is not the cloth and
+#  not the pixels -- Newton with a camera and NO deformable at all is 4.2 steps/s where
+#  PhysX with the same camera is 45.6. Light type, RTX quality, camera resolution and
+#  particle count were each measured and each changed nothing. docs/PHYSICS.md.
+#  So: collect headless, render clips as a separate pass (scripts/capture_clip.py).
+#
+#  REACH. The shirt is 1.156 m; at scale 0.25 it is 289 mm, against a 300 mm arm. The far
+#  sleeve is outside the workspace on purpose -- that is what a garment is. Drop the scale
+#  if you want all of it reachable.
+#
+#  The task's own cube is still what the rewards track. The shirt is here to interact
+#  with, not to be scored on. Nothing has been trained against it.
+# =====================================================================================
+
+meta:
+  name: lehome-bedroom-shirt
+  notes: LeHome garment as Newton VBD cloth. Not a folding task -- folding wants two arms.
+
+task: pick_place
+
+scene:
+  num_envs: 2               # particle cloth: tens of envs, not thousands
+  env_spacing: 1.5
+  robot:
+    type: so101_full        # 128.6 mm opening. Cloth needs a gripper that can pinch a fold.
+    rot: [0.0, 0.0, 0.0, 1.0]
+    collision_approximation: convexHull   # skips most of Newton's CoACD startup cost
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    shirt:
+      type: cloth
+      usd_path: "assets/garment/shirt.usd"
+      scale: 0.25           # 1.156 m garment -> 289 mm
+      # A quarter of the 6.07 mm median edge. It does exceed the mesh's tightest 1.04 mm
+      # edges, so the closest neighbours overlap slightly at rest -- stable, measured. The
+      # radius that must stay under that minimum is the solver's self-contact radius, not
+      # this one; see so101_scene/pick_place_env_cfg.py.
+      particle_radius: 0.0015
+      pos: [0.22, 0.0, 0.08]
+      color: [0.35, 0.45, 0.85]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.56, -0.40, 0.40]
+      look_at: [0.20, 0.04, 0.02]
+      focal_length: 16.0     # wide: a 289 mm garment does not fit a 20 mm lens from here
+
+sim:
+  episode_length_s: 60.0    # long: nothing here is scored, so do not reset it
+  physics: newton_vbd
+
+control:
+  source: zero
+  action_horizon: 1

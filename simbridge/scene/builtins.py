@@ -406,38 +406,56 @@ def _cloth(spec: dict[str, Any]) -> Any:
     """A rectangular sheet of cloth. Needs ``sim.physics: newton_vbd``.
 
     ``resolution`` is the performance dial and the fidelity dial at once: it is the particle grid,
-    so 8x8 is 64 particles per environment and 32x32 is 1024. Isaac Lab's shipped cloth task uses
+    and it counts ELEMENTS, so a grid of n has n+1 nodes a side: 8x8 is 81 particles per
+    environment and 32x32 is 1089. Isaac Lab's shipped cloth task uses
     8x8.
     """
     from isaaclab.assets.deformable_object import DeformableObjectCfg
     from isaaclab_newton.sim.schemas import NewtonDeformableBodyPropertiesCfg
     from isaaclab_newton.sim.spawners.materials import NewtonSurfaceDeformableBodyMaterialCfg
 
-    size = tuple(spec.get("size", (0.12, 0.12)))
-    res = tuple(int(v) for v in spec.get("resolution", (8, 8)))
+    material = NewtonSurfaceDeformableBodyMaterialCfg(
+        density=float(spec.get("density", 1.0)),
+        particle_radius=float(spec.get("particle_radius", 0.002)),
+        tri_ke=float(spec.get("tri_ke", 5e2)),      # in-plane stretch
+        tri_ka=float(spec.get("tri_ka", 5e2)),      # in-plane shear
+        tri_kd=float(spec.get("tri_kd", 1e-3)),
+        edge_ke=float(spec.get("edge_ke", 0.5)),    # bending; low = drapes, high = card
+        edge_kd=float(spec.get("edge_kd", 1e-3)),
+    )
+    visual = sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(spec["color"])) if "color" in spec else None
+
+    if "usd_path" in spec:
+        # An arbitrary garment mesh instead of a flat grid. No new spawner is needed:
+        # spawn_from_usd already routes `deformable_props` to define_deformable_body_properties,
+        # picks "surface" from the material being a SurfaceDeformableBodyMaterialBaseCfg, and
+        # finds the single Mesh under the prim itself.
+        # A scalar or a triple, so `scale` means the same thing here as on `usd` and `lehome`.
+        raw = spec.get("scale", 1.0)
+        scale = (float(raw),) * 3 if isinstance(raw, (int, float)) else tuple(float(v) for v in raw)
+        spawn = sim_utils.UsdFileCfg(
+            usd_path=spec["usd_path"],
+            scale=scale,
+            deformable_props=NewtonDeformableBodyPropertiesCfg(),
+            visual_material=visual,
+            physics_material=material,
+        )
+    else:
+        spawn = sim_utils.MeshRectangleCfg(
+            size=tuple(spec.get("size", (0.12, 0.12))),
+            resolution=tuple(int(v) for v in spec.get("resolution", (8, 8))),
+            deformable_props=NewtonDeformableBodyPropertiesCfg(),
+            visual_material=visual or sim_utils.PreviewSurfaceCfg(diffuse_color=(0.95, 0.85, 0.10)),
+            physics_material=material,
+        )
+
     return DeformableObjectCfg(
         prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/Cloth"),
         init_state=DeformableObjectCfg.InitialStateCfg(
             pos=_pos(spec, default=(0.20, 0.0, 0.02)),
             rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
         ),
-        spawn=sim_utils.MeshRectangleCfg(
-            size=size,
-            resolution=res,
-            deformable_props=NewtonDeformableBodyPropertiesCfg(),
-            visual_material=sim_utils.PreviewSurfaceCfg(
-                diffuse_color=tuple(spec.get("color", (0.95, 0.85, 0.10)))
-            ),
-            physics_material=NewtonSurfaceDeformableBodyMaterialCfg(
-                density=float(spec.get("density", 1.0)),
-                particle_radius=float(spec.get("particle_radius", 0.002)),
-                tri_ke=float(spec.get("tri_ke", 5e2)),      # in-plane stretch
-                tri_ka=float(spec.get("tri_ka", 5e2)),      # in-plane shear
-                tri_kd=float(spec.get("tri_kd", 1e-3)),
-                edge_ke=float(spec.get("edge_ke", 0.5)),    # bending; low = drapes, high = card
-                edge_kd=float(spec.get("edge_kd", 1e-3)),
-            ),
-        ),
+        spawn=spawn,
     )
 
 
@@ -489,6 +507,66 @@ def _usd(spec: dict[str, Any]) -> RigidObjectCfg:
         prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/Object"),
         init_state=RigidObjectCfg.InitialStateCfg(pos=_pos(spec), rot=tuple(spec.get("rot", (1.0, 0.0, 0.0, 0.0)))),
         spawn=sim_utils.UsdFileCfg(usd_path=spec["usd_path"], scale=tuple(spec.get("scale", (1.0, 1.0, 1.0)))),
+    )
+
+
+# --------------------------------------------------------------- lights
+#
+# The task ships one DomeLight at /World/light. Naming `light` in a config replaces it, because
+# the builder reuses an existing scene entry's prim path -- no new registry kind needed.
+
+
+@register_object("light")
+def _light(spec: dict[str, Any]) -> AssetBaseCfg:
+    """Replace the scene light: ``{type: light, kind: distant}``.
+
+    A dome light is an environment light -- every camera ray that escapes the geometry samples
+    it. A distant light is a single direction and costs almost nothing. Which one is faster
+    depends on the renderer and the scene, so measure rather than assume; docs/PHYSICS.md has
+    the numbers for this scene.
+
+    ``intensity`` is NOT comparable across kinds: a dome's is a radiance over the whole sphere,
+    a distant light's is an irradiance from one direction. Changing ``kind`` without re-tuning
+    ``intensity`` gives a black or blown-out image, which reads as a broken light rather than a
+    unit mismatch.
+    """
+    # The builder gives an entry the prim path of the scene entry it is overriding, and the task
+    # calls its light `light`. Under any other key it resolves to {ENV_REGEX_NS}/<key>, which
+    # spawns an extra per-environment light and leaves the task's dome exactly where it was --
+    # brighter scene, no error, and nothing in the config saying so.
+    prim_path = spec.get("prim_path", "/World/light")
+    if "ENV_REGEX_NS" in prim_path:
+        raise ValueError(
+            f"a light entry has to be named 'light' to replace the task's own; as {prim_path!r} "
+            "it would be an additional light rather than a replacement"
+        )
+    kind = spec.get("kind", "dome")
+    color = tuple(spec.get("color", (0.75, 0.75, 0.75)))
+    if kind == "dome":
+        spawn = sim_utils.DomeLightCfg(color=color, intensity=float(spec.get("intensity", 3000.0)))
+    elif kind == "distant":
+        spawn = sim_utils.DistantLightCfg(
+            color=color,
+            intensity=float(spec.get("intensity", 2000.0)),
+            angle=float(spec.get("angle", 0.53)),   # degrees; the sun's is 0.53
+        )
+    elif kind == "sphere":
+        spawn = sim_utils.SphereLightCfg(
+            color=color,
+            intensity=float(spec.get("intensity", 30000.0)),
+            radius=float(spec.get("radius", 0.05)),
+        )
+    else:
+        raise KeyError(f"unknown light kind {kind!r}; expected one of dome, distant, sphere")
+
+    return AssetBaseCfg(
+        prim_path=prim_path,
+        init_state=AssetBaseCfg.InitialStateCfg(
+            # A distant light shines down -Z at identity, which is what a config usually wants.
+            pos=_pos(spec, default=(0.0, 0.0, 2.0)),
+            rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        ),
+        spawn=spawn,
     )
 
 
@@ -547,8 +625,11 @@ def look_at_quat(pos, target, up=(0.0, 0.0, 1.0)) -> tuple[float, float, float, 
 
 @register_camera("tiled")
 def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
-    """TiledCamera: the batched renderer. Measured ~27k frames/s at 128px on a 4070 Ti,
-    with cost flat per step regardless of env count -- see docs/bench_camera.txt.
+    """TiledCamera: the batched renderer. Cheap on a rigid PhysX scene -- 45.6 steps/s at
+    640x480, 1 env. Not cheap on a Newton deformable scene, where the same camera costs 13x
+    and nothing exposed here changes that: light type, RTX quality, resolution, particle count
+    and even swapping to Newton's own Warp rasteriser were each measured and each changed the
+    rate by nothing. docs/PHYSICS.md has the table and the mechanism.
 
     Aim it with ``look_at: [x, y, z]`` (env-relative), or with an explicit ``rot`` quaternion.
     """
@@ -562,7 +643,7 @@ def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
     else:
         rot = tuple(spec.get("rot", (0.0, 0.259, 0.0, 0.966)))
         convention = spec.get("convention", "opengl")
-    return TiledCameraCfg(
+    cfg = TiledCameraCfg(
         prim_path=spec["prim_path"],
         offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention=convention),
         data_types=list(spec.get("data_types", ["rgb"])),
@@ -573,6 +654,7 @@ def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
         width=int(res[0]),
         height=int(res[1]),
     )
+    return cfg
 
 
 def demo() -> None:

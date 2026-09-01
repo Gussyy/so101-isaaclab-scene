@@ -274,6 +274,30 @@ def physics_options(preset) -> dict[str, Any]:
 _GRIPPER_KEYS = {"open", "close", "stiffness", "damping", "effort", "velocity"}
 
 
+def apply_cloth_proxy_bodies(env_cfg, leaf_names) -> list[str]:
+    """Repoint the rigid->soft coupler at the bodies the chosen robot actually has.
+
+    ``PickPlacePhysicsCfg.newton_vbd`` lists ``Robot/gripper`` and ``Robot/moving_jaw_so101_v1``:
+    the single-jaw robot's palm and jaw, flat under ``/Robot`` because that asset is flat. Select
+    ``so101_full`` and the scene refuses to build at all::
+
+        ValueError: CouplerCfg proxy 'rigid'->'soft': body-label regex
+        '/World/envs/env_[^/]+/Robot/gripper' matched no Newton bodies.
+
+    -- there is no body called ``gripper``, and this asset nests its bodies as the kinematic
+    chain, so a one-level path would not have matched even if there were. ``.*/`` walks the chain.
+
+    Returns the regexes it wrote, or [] when the backend has no coupler (PhysX, plain MJWarp).
+    """
+    proxies = getattr(getattr(getattr(env_cfg.sim, "physics", None), "solver_cfg", None), "proxies", None)
+    if not proxies:
+        return []
+    bodies = [rf"/World/envs/env_[^/]+/Robot/.*/{name}$" for name in leaf_names]
+    for proxy in proxies:
+        proxy.bodies = list(bodies)
+    return bodies
+
+
 def apply_robot_wiring(env_cfg, robot_spec: dict[str, Any]) -> None:
     """Repoint the task's end-effector and gripper action at the robot the config chose.
 
@@ -298,6 +322,7 @@ def apply_robot_wiring(env_cfg, robot_spec: dict[str, Any]) -> None:
             )
         return
     from so101_scene.tuning import (
+        SO101_FULL_CLOTH_BODIES,
         SO101_FULL_ARM_JOINTS,
         SO101_FULL_BASE_PATH,
         SO101_FULL_CLOSE,
@@ -352,6 +377,8 @@ def apply_robot_wiring(env_cfg, robot_spec: dict[str, Any]) -> None:
             from isaaclab.managers import SceneEntityCfg
 
             rew.params["asset_cfg"] = SceneEntityCfg("robot", joint_names=list(SO101_FULL_ARM_JOINTS))
+
+    apply_cloth_proxy_bodies(env_cfg, SO101_FULL_CLOTH_BODIES)
 
 
 def load_env_cfg(gym_id: str, device: str, num_envs: int, physics: str | None):

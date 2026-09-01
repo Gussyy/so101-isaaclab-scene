@@ -12,7 +12,8 @@
 #  docs/PHYSICS.md says what that costs you.
 #
 #  WHAT THE DIALS DO
-#    resolution   the particle grid, and the whole performance story. 8x8 = 64 particles
+#    resolution   the particle grid, and the whole performance story. It counts ELEMENTS, so
+#                 a grid of n has n+1 nodes a side: 8x8 = 81 particles
 #                 per env; 32x32 = 1024. Cost is particles x substeps x iterations.
 #    tri_ke/ka    in-plane stretch and shear. High = canvas, low = jersey.
 #    edge_ke      bending. Low drapes and folds; high behaves like card.

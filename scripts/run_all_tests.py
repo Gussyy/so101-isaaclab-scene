@@ -298,6 +298,77 @@ def test_lehome() -> None:
     record("sim.lift_height reaches the reward term", "LIFT" in lines, last)
 
 
+def test_garment() -> None:
+    """The shirt: a USD mesh as Newton cloth, and the two things that silently stop working.
+
+    The coupler's body list is written for the single-jaw robot, so selecting the parallel
+    gripper used to fail the scene outright. And the shirt mesh has to stay near-uniform or
+    self-collision is impossible -- that is a property of the committed asset, so check it.
+    """
+    print("\ngarment cloth")
+    src_code = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, '.')
+        import numpy as np
+        from pathlib import Path
+        from pxr import Usd, UsdGeom
+
+        shirt = Path('assets/garment/shirt.usd')
+        assert shirt.exists(), 'assets/garment/shirt.usd is missing; run scripts/make_garment.py'
+        stage = Usd.Stage.Open(str(shirt))
+        meshes = [p for p in stage.Traverse() if p.IsA(UsdGeom.Mesh)]
+        assert len(meshes) == 1, f'deformables need exactly one Mesh, found {len(meshes)}'
+        m = UsdGeom.Mesh(meshes[0])
+        pts = np.array(m.GetPointsAttr().Get()); f = np.array(m.GetFaceVertexIndicesAttr().Get()).reshape(-1, 3)
+        e = np.concatenate([pts[f[:,0]]-pts[f[:,1]], pts[f[:,1]]-pts[f[:,2]], pts[f[:,2]]-pts[f[:,0]]])
+        L = np.linalg.norm(e, axis=1)
+        # Quadric decimation gave 170x here and self-collision was impossible. Voxel clustering
+        # gives ~9x. Anything above 20x means the asset was regenerated the wrong way.
+        ratio = L.max() / L.min()
+        print('MESH', len(pts), f'{ratio:.0f}x')
+        assert ratio < 20, f'edge-length spread {ratio:.0f}x is too irregular for self-collision'
+
+        import so101_scene  # noqa: F401
+        from simbridge.builder import build_env_cfg, load_config
+        from simbridge.registry import register_task
+        register_task('pick_place', 'SO101-PickPlace-v0')
+
+        cfg = build_env_cfg(load_config('configs/lehome_bedroom_shirt.yaml'), device='cuda:0', num_envs=1)
+        spawn = cfg.scene.shirt.spawn
+        print('SPAWN' if type(spawn).__name__ == 'UsdFileCfg' else f'WRONG SPAWN {type(spawn).__name__}')
+
+        proxies = cfg.sim.physics.solver_cfg.proxies
+        bodies = proxies[0].bodies
+        ok = any('gripper_base' in b for b in bodies) and not any(b.endswith('/gripper') for b in bodies)
+        print('PROXY' if ok else f'PROXY NOT REPOINTED {bodies}')
+
+        vbd = cfg.sim.physics.solver_cfg.entries[1].solver_cfg
+        # The radius has to stay under the mesh's tightest edge at scale, or every particle
+        # collides with its own neighbour and the shirt tears itself apart in 60 steps.
+        tight = float(L.min()) * cfg.scene.shirt.spawn.scale[0]
+        print('SELFCONTACT' if vbd.particle_enable_self_contact and vbd.particle_self_contact_radius < tight
+              else f'SELFCONTACT BAD {vbd.particle_self_contact_radius} vs {tight}')
+
+        from simbridge.registry import OBJECTS
+        try:
+            OBJECTS['light']({'kind': 'floodlight'})
+        except KeyError:
+            print('LIGHT')
+        else:
+            print('LIGHT KIND ACCEPTED')
+        """
+    )
+    code, out = sh([PY, "-c", src_code], timeout=300)
+    lines = {ln.split(" ")[0] for ln in out.splitlines()}
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    record("the shipped shirt is one near-uniform mesh", code == 0 and "MESH" in lines, last)
+    record("a USD mesh spawns as cloth", "SPAWN" in lines, last)
+    record("the cloth coupler follows the chosen robot", "PROXY" in lines, last)
+    record("self-contact radius is under the mesh spacing", "SELFCONTACT" in lines, last)
+    record("an unknown light kind is refused", "LIGHT" in lines, last)
+
+
 def test_registry() -> None:
     print("\nregistry")
     src = (
@@ -305,7 +376,7 @@ def test_registry() -> None:
         "import simbridge.sources, simbridge.scene;"
         "from simbridge.registry import ROBOTS, OBJECTS, CAMERAS, SOURCES;"
         "assert 'so101' in ROBOTS, ROBOTS;"
-        "assert {'cuboid','static_cuboid','usd','ycb','cloth','soft_body','lehome'} <= set(OBJECTS), OBJECTS;"
+        "assert {'cuboid','static_cuboid','usd','ycb','cloth','soft_body','lehome','light'} <= set(OBJECTS), OBJECTS;"
         "assert 'tiled' in CAMERAS, CAMERAS;"
         "assert {'zero','random','rl_checkpoint','zmq','keyboard'} <= set(SOURCES), SOURCES;"
         "print('robots', len(ROBOTS), 'objects', len(OBJECTS), 'cameras', len(CAMERAS), 'sources', len(SOURCES))"
@@ -459,6 +530,7 @@ def main() -> None:
     test_physics_selection()
     test_gripper_config()
     test_lehome()
+    test_garment()
     test_registry()
     test_scripts_help()
     test_zmq_roundtrip()
