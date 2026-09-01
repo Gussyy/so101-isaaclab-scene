@@ -128,6 +128,31 @@ def ycb_usd_path(name: str) -> str:
     return f"{ISAAC_NUCLEUS_DIR}/Props/YCB/Axis_Aligned/{PROP_CATALOGUE[name][0]}.usd"
 
 
+def _apply_physics_material(prim_path: str, cfg) -> None:
+    """Create and bind the friction material, after the colliders exist.
+
+    ``spawn_from_usd`` does this itself -- but *during* the spawn, which is before either of the
+    spawners below has defined a single collider. The bind then finds nothing with a physics
+    attribute to attach to and logs::
+
+        [Warning] Could not perform 'bind_physics_material' on any prims under:
+        '/World/envs/env_0/Object'.
+
+    A warning, not an error. So the asset spawns and simulates with whatever friction the USD
+    happened to ship, silently ignoring the config -- the failure mode this repo keeps meeting:
+    a setting that looks applied and is not. Both spawners therefore hold the material back out
+    of the spawn (``physics_material=None`` on the visual pass) and do it here instead.
+    """
+    if getattr(cfg, "physics_material", None) is None:
+        return
+    from isaaclab.sim import bind_physics_material
+
+    rel = cfg.physics_material_path
+    material_path = rel if rel.startswith("/") else f"{prim_path}/{rel}"
+    cfg.physics_material.func(material_path, cfg.physics_material)
+    bind_physics_material(prim_path, material_path)
+
+
 def _spawn_prop(prim_path: str, cfg, translation=None, orientation=None, **kwargs):
     """Spawn a YCB prop and give it the physics it does not ship with.
 
@@ -150,7 +175,8 @@ def _spawn_prop(prim_path: str, cfg, translation=None, orientation=None, **kwarg
     from isaaclab.sim.spawners.from_files import spawn_from_usd
     from pxr import Usd, UsdGeom
 
-    visual = cfg.replace(rigid_props=None, collision_props=None, mass_props=None)
+    # physics_material is held back too -- see _apply_physics_material.
+    visual = cfg.replace(rigid_props=None, collision_props=None, mass_props=None, physics_material=None)
     prim = spawn_from_usd(prim_path, visual, translation, orientation)
 
     schemas.define_rigid_body_properties(prim_path, cfg.rigid_props)
@@ -164,6 +190,7 @@ def _spawn_prop(prim_path: str, cfg, translation=None, orientation=None, **kwarg
             schemas.define_mesh_collision_properties(
                 str(child.GetPath()), MeshCollisionPropertiesCfg(mesh_approximation_name="convexHull")
             )
+    _apply_physics_material(prim_path, cfg)
     return prim
 
 
@@ -201,6 +228,158 @@ def _ycb(spec: dict[str, Any]) -> RigidObjectCfg:
             mass_props=MassPropertiesCfg(mass=float(spec.get("mass", 0.03))),
             # The friction the shipped materials carry is tuned for a parallel jaw. A single-jaw
             # pinch needs more, exactly as the task's own cube does.
+            physics_material=RigidBodyMaterialCfg(
+                static_friction=float(spec.get("static_friction", 1.2)),
+                dynamic_friction=float(spec.get("dynamic_friction", 1.0)),
+            ),
+        ),
+    )
+
+
+# ------------------------------------------------------- LeHome household props
+#
+# https://github.com/lehome-official/lehome publishes a household asset library -- burger parts,
+# tableware, towels, appliances -- as a public HuggingFace dataset. The USD loads here. LeHome's
+# task code does not: it targets Isaac Lab 2.3 with PhysX particle cloth and fluid, bimanual, in a
+# 4.8 GB apartment. docs/LEHOME.md says exactly what did and did not come across.
+#
+# Two things about these files decide how they have to be spawned, and both were measured rather
+# than assumed (`python scripts/measure_lehome.py`):
+#
+#   1. Only about half of them author physics. The rest are visual meshes, like the YCB props.
+#   2. Those that do put the rigid body on a CHILD of the default prim -- /root/Bowl016, not
+#      /root. Isaac Lab's `modify_*` helpers address `prim_path` itself, so a `rigid_props` on the
+#      UsdFileCfg lands on the wrong prim and raises for having no API there.
+#
+# One spawner handles both: find the body if there is one, define one if there is not.
+
+
+def lehome_usd_path(name: str) -> str:
+    """Absolute path to a named LeHome asset.
+
+    Raises with the full list on a typo, and with the download command if the library is simply
+    not there yet -- it is 1.5 GB and deliberately not committed.
+    """
+    from pathlib import Path
+
+    from simbridge.objective import LEHOME_CATALOGUE
+
+    if name not in LEHOME_CATALOGUE:
+        raise KeyError(f"unknown lehome prop {name!r}. Available: {', '.join(sorted(LEHOME_CATALOGUE))}")
+    path = Path(__file__).resolve().parent.parent.parent / "assets" / "lehome" / LEHOME_CATALOGUE[name].path
+    if not path.exists():
+        raise FileNotFoundError(
+            f"{path} is missing. The LeHome assets are not part of this repository -- fetch them:"
+            "\n    python scripts/fetch_lehome.py"
+        )
+    return path.as_posix()
+
+
+def _lehome_spawner(approximation: str | None):
+    """Spawn a LeHome asset and make sure it ends up with exactly one rigid body."""
+
+    def _spawn(prim_path: str, cfg, translation=None, orientation=None, **kwargs):
+        # pxr is imported here, not at module scope: importing it before the Kit app exists loads
+        # a second USD runtime and every usd_*.dll in the extension cache then fails to load.
+        from isaaclab.sim import schemas
+        from isaaclab.sim.schemas.schemas_cfg import CollisionPropertiesCfg, MeshCollisionPropertiesCfg
+        from isaaclab.sim.spawners.from_files import spawn_from_usd
+        from pxr import Usd, UsdGeom, UsdPhysics
+
+        # physics_material is held back too -- see _apply_physics_material.
+        visual = cfg.replace(rigid_props=None, collision_props=None, mass_props=None, physics_material=None)
+        prim = spawn_from_usd(prim_path, visual, translation, orientation)
+
+        body = next((p for p in Usd.PrimRange(prim) if p.HasAPI(UsdPhysics.RigidBodyAPI)), None)
+        if body is None:
+            # Visuals only, exactly like the YCB props. Define the schemas after the spawn.
+            schemas.define_rigid_body_properties(prim_path, cfg.rigid_props)
+            body_path = prim_path
+            for child in Usd.PrimRange(prim):
+                if child.IsA(UsdGeom.Mesh):
+                    schemas.define_collision_properties(str(child.GetPath()), CollisionPropertiesCfg())
+                    schemas.define_mesh_collision_properties(
+                        str(child.GetPath()),
+                        MeshCollisionPropertiesCfg(mesh_approximation_name=approximation or "convexHull"),
+                    )
+        else:
+            body_path = str(body.GetPath())
+            schemas.modify_rigid_body_properties(body_path, cfg.rigid_props)
+            if approximation:
+                # Several of these ask for convexDecomposition, which is what makes a Newton
+                # scene build cost minutes rather than seconds. Same dial the robot has.
+                for child in Usd.PrimRange(prim):
+                    if child.HasAPI(UsdPhysics.MeshCollisionAPI):
+                        schemas.modify_mesh_collision_properties(
+                            str(child.GetPath()),
+                            MeshCollisionPropertiesCfg(mesh_approximation_name=approximation),
+                        )
+
+        if cfg.mass_props is not None:
+            # define_, not modify_: the body may or may not already carry MassAPI.
+            schemas.define_mass_properties(body_path, cfg.mass_props)
+        _apply_physics_material(prim_path, cfg)
+        return prim
+
+    return _spawn
+
+
+@register_object("lehome")
+def _lehome(spec: dict[str, Any]) -> Any:
+    """A named LeHome household prop: ``{type: lehome, name: burger_patty}``.
+
+    ``static: true`` returns scenery rather than a rigid body, which is the only sane way to place
+    the appliances -- a refrigerator is 824 mm across and this arm reaches 300 mm.
+    """
+    from simbridge.objective import LEHOME_CATALOGUE, graspable
+
+    name = spec.get("name")
+    if not name:
+        raise KeyError("a lehome object needs a 'name' (e.g. name: burger_patty)")
+    prop = LEHOME_CATALOGUE[name] if name in LEHOME_CATALOGUE else None
+    usd_path = lehome_usd_path(name)          # raises with the list / the fetch command
+    size = float(spec.get("scale", 1.0))
+
+    if spec.get("static", False):
+        return AssetBaseCfg(
+            prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/" + name.title().replace("_", "")),
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=_pos(spec), rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0)))
+            ),
+            spawn=sim_utils.UsdFileCfg(usd_path=usd_path, scale=(size, size, size)),
+        )
+
+    # A warning, not an error: a task may legitimately want something it pushes rather than lifts.
+    # But a policy will not learn to lift what the gripper cannot close on, and that failure looks
+    # exactly like a broken policy.
+    ok, why = graspable(prop.width * size, float(spec.get("jaw", 0.1286)))
+    if not ok:
+        print(f"  [lehome] {name}: {why} -- the gripper cannot close on this. docs/LEHOME.md")
+
+    mass = spec.get("mass")
+    return RigidObjectCfg(
+        prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/Object"),
+        init_state=RigidObjectCfg.InitialStateCfg(
+            pos=_pos(spec, default=(0.20, 0.0, 0.05)),
+            rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        ),
+        spawn=sim_utils.UsdFileCfg(
+            func=_lehome_spawner(spec.get("collision_approximation")),
+            usd_path=usd_path,
+            scale=(size, size, size),
+            # Collision meshes inside an instanced prototype are instance proxies and cannot be
+            # written to, so an approximation override would silently no-op without this.
+            make_uninstanceable=bool(spec.get("collision_approximation")),
+            rigid_props=RigidBodyPropertiesCfg(
+                solver_position_iteration_count=16,
+                solver_velocity_iteration_count=1,
+                max_depenetration_velocity=5.0,
+                disable_gravity=False,
+            ),
+            # These author household masses -- 0.5 kg for a bowl, 0.2 kg for a bun -- on an arm
+            # whose reference cube is 15 g. Left alone by default rather than silently rescaled;
+            # `mass:` in the config overrides it.
+            mass_props=MassPropertiesCfg(mass=float(mass)) if mass is not None else None,
             physics_material=RigidBodyMaterialCfg(
                 static_friction=float(spec.get("static_friction", 1.2)),
                 dynamic_friction=float(spec.get("dynamic_friction", 1.0)),

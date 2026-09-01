@@ -110,7 +110,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | kind | names |
 |---|---|
 | robots | `so101`, `so101_full` |
-| objects | `cuboid`, `ycb`, `static_cuboid`, `usd` |
+| objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `cloth`, `soft_body` |
 | cameras | `tiled` |
 | sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `gripper_cycle`, `zmq` |
 
@@ -370,6 +370,57 @@ The widths are measured, not copied from the YCB spec sheet — `python scripts/
 opens each asset and reports any drift from the table the checker uses.
 
 Full reference: [docs/OBJECTS.md](docs/OBJECTS.md) · raw table: [docs/objects.txt](docs/objects.txt).
+
+## Household props and tasks, from LeHome
+
+[LeHome](https://github.com/lehome-official/lehome) is a household-manipulation environment built
+on the same robot this repo uses. Its **assets** are a public, CC-BY-4.0 HuggingFace release, so
+they load here directly; its **code** does not (Isaac Lab 2.3, PhysX particle cloth and fluid,
+two arms). 45 of its props and four of its tasks have been adapted:
+
+```bash
+python scripts/fetch_lehome.py       # ~1.7 GB, once. assets/lehome/ is gitignored.
+python scripts/run.py --config configs/lehome_kitchen_burger.yaml --steps 0 --viz kit
+```
+
+![four LeHome-derived tasks: burger, chopping board, sponge and towel, glass and plate](docs/lehome/rooms.png)
+
+| config | adapted from | clip |
+|---|---|---|
+| `lehome_kitchen_burger.yaml` | `loft_burger_bi` | [mp4](docs/lehome/lehome_kitchen_burger.mp4) |
+| `lehome_kitchen_cut.yaml` | `loft_cut_bi` | [mp4](docs/lehome/lehome_kitchen_cut.mp4) |
+| `lehome_washroom_wipe.yaml` | `loft_wipe` | [mp4](docs/lehome/lehome_washroom_wipe.mp4) |
+| `lehome_livingroom_cup.yaml` | `loft_water` | [mp4](docs/lehome/lehome_livingroom_cup.mp4) |
+
+```yaml
+scene:
+  objects:
+    object:
+      type: lehome
+      name: burger_patty
+    plate:
+      type: lehome
+      name: burger_plate
+      static: true          # scenery: no rigid body
+```
+
+**These need the parallel gripper.** The props are real household sizes — a 91 mm glass, a 131 mm
+bun — so 36 of the 45 fit `so101_full`'s 128.6 mm opening and only 12 fit the single jaw's 36 mm.
+Every adapted config specifies `type: so101_full` for that reason.
+
+Two things the adaptation had to fix, both of which are the quiet kind:
+
+- **Only 33 of the 45 props author a rigid body**, and those that do put it on a *child* of the
+  default prim, so the task's `body_names="Object"` regex stops matching. Both are handled, and
+  `scripts/measure_lehome.py` fails if the catalogue's record of which is which drifts from the
+  files.
+- **A taller prop is already "lifted"** at the task's stock 25 mm threshold — the glass rests with
+  its origin 51 mm up, so `lifting_object` pays out in full at step 0 with the arm parked. New
+  config key: `sim.lift_height`.
+
+What did *not* come across — the second arm, PhysX particle cloth, the fluid, the mesh cutting,
+the 4.8 GB apartment — and why, is in **[docs/LEHOME.md](docs/LEHOME.md)**. Raw measurements:
+[docs/lehome_objects.txt](docs/lehome_objects.txt).
 
 ## LeRobot
 

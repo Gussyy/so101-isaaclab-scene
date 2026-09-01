@@ -125,3 +125,12 @@ Swap `name: gelatin_box` for any other prop; nothing else in the config changes.
 
 The shipped PPO checkpoint was trained on the 25 mm cube, so it is not an expert on these. They
 are a starting point for a new task, not a drop-in swap.
+
+## The friction in this table's configs was not being applied
+
+`{type: ycb}` spawns the visual USD and then defines the rigid body and colliders, because these
+assets ship none. Isaac Lab binds the config's friction material *during* the spawn, so until
+2026-09 the bind ran before any collider existed, found nothing, logged a warning, and the props
+used whatever friction their USD carried. `static_friction` / `dynamic_friction` in a config had
+no effect. Fixed in `simbridge/scene/builtins.py` (`_apply_physics_material`), verified by reading
+the binding back off the stage; see [LEHOME.md](LEHOME.md) for the measurements.

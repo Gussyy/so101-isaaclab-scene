@@ -23,7 +23,7 @@ from simbridge.registry import CAMERAS, OBJECTS, ROBOTS, TASKS, lookup
 
 _TOP_LEVEL = {"task", "scene", "sim", "control", "render", "objective", "meta"}
 _SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras"}
-_SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device"}
+_SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device", "lift_height"}
 
 # Named RTX settings, plus `carb_settings` for anything not surfaced here.
 # DLSS upscales from a lower internal resolution; DLSS-G (`frame_generation`) interpolates
@@ -402,6 +402,81 @@ def load_env_cfg(gym_id: str, device: str, num_envs: int, physics: str | None):
     return env_cfg
 
 
+def relax_object_bodies(env_cfg, names: set[str]) -> list[str]:
+    """Stop task terms from addressing the object's body by the name the cube happens to have.
+
+    ``contrib.lift`` resets the cube with ``SceneEntityCfg("object", body_names="Object")``. That
+    regex matches the *prim leaf* of the rigid body, and for a primitive cuboid the body is the
+    spawned prim itself, so the leaf is ``Object`` and it matches.
+
+    A USD prop is not built like that. LeHome's assets put the rigid body on a child of the
+    default prim -- ``.../Object/Burger_Beef_Patties001`` -- so the leaf is the artist's name for
+    the mesh and nothing matches::
+
+        ValueError: Error while parsing 'reset_object_position:asset_cfg'.
+        Not all regular expressions are matched!  Object: []
+        Available strings: ('Burger_Beef_Patties001',)
+
+    Widening the regex to ``.*`` is exact rather than sloppy: Isaac Lab's ``RigidObject`` already
+    refuses an asset that resolves to anything other than exactly one rigid body, so ``.*`` can
+    only ever match the one body the task means.
+
+    Returns the terms it touched, so a test can assert it actually did something -- this repo has
+    been bitten repeatedly by settings that look applied and are not.
+    """
+    from isaaclab.managers import SceneEntityCfg
+
+    touched: list[str] = []
+
+    def visit(group, path: str) -> None:
+        for attr, term in vars(group).items():
+            if attr.startswith("_"):
+                continue
+            params = getattr(term, "params", None)
+            if isinstance(params, dict):
+                for key, value in params.items():
+                    if (
+                        isinstance(value, SceneEntityCfg)
+                        and value.name in names
+                        and value.body_names is not None
+                        and value.body_names != ".*"
+                    ):
+                        value.body_names = ".*"
+                        touched.append(f"{path}.{attr}.{key}")
+            elif hasattr(term, "__dict__"):
+                visit(term, f"{path}.{attr}")          # observation groups nest one level
+
+    for group_name in ("events", "rewards", "terminations", "observations", "curriculum"):
+        group = getattr(env_cfg, group_name, None)
+        if group is not None:
+            visit(group, group_name)
+    return touched
+
+
+def apply_lift_height(env_cfg, height: float) -> list[str]:
+    """Raise the height at which the task counts the object as lifted, and return what changed.
+
+    Three reward terms share one ``minimal_height``, tuned to 0.025 m for a 25 mm cube whose
+    centre sits at 12.5 mm. A household prop is taller: LeHome's glass cup has its origin 51 mm
+    up, so ``lifting_object`` pays out in full at step 0 and the reward curve starts at its
+    ceiling with the arm still parked. That is not a bug you notice by watching -- the scene
+    looks right and the number looks good -- so it is worth a config key rather than a comment.
+
+    Rule of thumb: the prop's resting centre height plus about 30 mm of clearance.
+    """
+    changed = []
+    for term in ("lifting_object", "object_goal_tracking", "object_goal_tracking_fine_grained"):
+        rew = getattr(getattr(env_cfg, "rewards", None), term, None)
+        if rew is not None and "minimal_height" in getattr(rew, "params", {}):
+            rew.params["minimal_height"] = height
+            changed.append(term)
+    if not changed:
+        raise ValueError(
+            "sim.lift_height was set but this task has no reward term taking 'minimal_height'"
+        )
+    return changed
+
+
 def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | None = None):
     """Construct the Isaac Lab env cfg described by ``cfg``.
 
@@ -424,14 +499,21 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
         env_cfg.decimation = int(sim_spec["decimation"])
     if "dt" in sim_spec:
         env_cfg.sim.dt = float(sim_spec["dt"])
+    if "lift_height" in sim_spec:
+        apply_lift_height(env_cfg, float(sim_spec["lift_height"]))
 
     if (robot := scene_spec.get("robot")) is not None:
         env_cfg.scene.robot = lookup(ROBOTS, robot["type"], "robot")(robot)
         apply_robot_wiring(env_cfg, robot)
 
-    for name, spec in (scene_spec.get("objects") or {}).items():
+    objects = scene_spec.get("objects") or {}
+    for name, spec in objects.items():
         spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}
         setattr(env_cfg.scene, name, lookup(OBJECTS, spec["type"], "object")(spec))
+    # Any entity the config replaced may be a USD prop whose rigid body is a child prim, so the
+    # task's body-name regexes no longer match. See relax_object_bodies.
+    if objects:
+        relax_object_bodies(env_cfg, set(objects))
 
     for name, spec in (scene_spec.get("cameras") or {}).items():
         spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}

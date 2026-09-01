@@ -1,0 +1,67 @@
+LeHome household assets, measured by opening each USD (scripts/measure_lehome.py).
+
+Gripper opening assumed: 128.6 mm (SO-ARM101-FULL parallel gripper, at the
+finger origins). Pass --jaw 0.0362 for the single-jaw so101.
+
+The `phys` column decides how the asset has to be spawned:
+  R = UsdPhysics.RigidBodyAPI authored   C = CollisionAPI   M = MassAPI
+  D = PhysX particle or deformable schemas authored in the file.
+An asset with no R spawns as scenery unless something defines the schemas for it, which
+is what simbridge's `lehome` object factory does.
+
+Measured result: NOTHING in this library carries a D. The `_Def` variants LeHome loads
+as DeformableObjectCfg are plain meshes with a mass and no colliders -- the deformable
+schema is applied at spawn time by LeHome's PhysX config, not stored in the USD. Under
+Newton those files therefore spawn as rigid visual meshes. See docs/LEHOME.md.
+
+name                shortest   longest     mass   phys  path
+----------------------------------------------------------------------------------------------------------------
+paper                  0.1mm   297.0mm      5 g      M  objects/Thin-Shells/Paper/PaperEN.usd  <- pick: 0 mm
+burger_tomato_slice     4.0mm    79.5mm     20 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_TomatoSlice001/Burger_TomatoSlice001.usd  <- pick: 4 mm
+burger_pickle          4.5mm    31.1mm     20 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_PickleSlice001/Burger_PickleSlice001.usd  <- pick: 4 mm
+red_bean               4.7mm     7.2mm      1 g    RCM  objects/Granular/RedBean001/RedBean001.usd  <- pick: 5 mm
+dish_towel             5.0mm   300.0mm        -      -  objects/Thin-Shells/DishTowel003/DishTowel003.usd  <- pick: 5 mm
+towel                  7.1mm   660.0mm  20000 g      M  objects/Thin-Shells/Towel/towel.usd  <- pick: 7 mm
+knife                  7.2mm   229.6mm    300 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Knife/Burger_Knife.usd  <- pick: 7 mm
+burger_cheese          8.2mm   115.4mm     20 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Cheese001/Burger_Cheese001.usd  <- pick: 8 mm
+burger_plate          14.0mm   226.6mm    500 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Plate/Burger_Plate.usd  <- pick: 14 mm
+burger_lettuce        18.2mm   133.5mm     50 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Lettuce_Leaves001/Burger_Lettuce_Leaves001.usd  <- pick: 18 mm
+burger_patty          19.9mm   136.8mm    200 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Beef_Patties001/Burger_Beef_Patties001.usd  <- pick: 20 mm
+burger_bun_bottom     21.8mm   131.0mm    200 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Bread002/Burger_Bread002.usd  <- pick: 22 mm
+chopping_block        23.8mm   464.9mm   1500 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_ChoppingBlock/Burger_ChoppingBlock.usd  <- pick: 24 mm
+broom                 25.0mm   189.0mm    150 g    RCM  objects/Volumetric_Objects/DesktopBroom001/DesktopBroom001.usd  <- pick: 25 mm
+sponge                27.7mm   109.6mm     50 g      M  objects/Volumetric_Objects/Sponge001/Sponge001.usd  <- pick: 28 mm
+sausage               32.5mm   149.4mm        -      C  objects/Volumetric_Objects/Sausage001/Sausage001.usd  <- pick: 32 mm
+sandwich_bread        35.0mm   150.0mm     10 g      M  objects/Volumetric_Objects/SandwichBread014/SandwichBread014.usd  <- pick: 35 mm
+cable                 35.1mm   556.8mm     10 g    RCM  objects/Linear_Objects/Cable/Cable.usd  <- pick: 35 mm
+stovetop              36.3mm   668.5mm  15000 g    RCM  objects/Plasmas/Stovetop017/Stovetop017.usd  <- pick: 36 mm
+spatula               36.5mm   273.5mm    200 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Spatula/Burger_Spatula.usd  <- pick: 36 mm
+burger_bun_top        37.7mm   131.9mm    200 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Bread001/Burger_Bread001.usd  <- pick: 38 mm
+bagged_food           40.0mm   160.0mm     20 g      M  objects/Volumetric_Objects/BaggedFood019/BaggedFood019.usd  <- pick: 40 mm
+mung_beans            41.3mm    62.3mm      1 g    RCM  objects/Granular/MungBean001/MungBean001.usd  <- pick: 41 mm
+toothpaste            43.4mm   238.2mm     10 g    RCM  objects/Volumetric_Objects/Toothpaste001/Toothpaste001.usd  <- pick: 43 mm
+tomato                45.3mm   111.9mm    200 g    RCM  objects/Volumetric_Objects/burger/Assets/Burger_Tomato001/Burger_Tomato001.usd  <- pick: 45 mm
+coffee_beans          53.7mm   116.2mm      1 g    RCM  objects/Granular/CoffeeBeans001/CoffeeBeans001.usd  <- pick: 54 mm
+candy                 60.0mm   190.0mm     42 g      M  objects/Volumetric_Objects/Candy012/Candy012.usd  <- pick: 60 mm
+soybeans              60.3mm    67.3mm      1 g    RCM  objects/Granular/Soybean001/Soybean001.usd  <- pick: 60 mm
+teapot                74.3mm   134.9mm    400 g    RCM  objects/Fluids/Teapot029/Teapot029.usd  <- pick: 74 mm
+ladle                 74.3mm   226.0mm    120 g    RCM  objects/Fluids/GourdLadle001/GourdLadle001.usd  <- pick: 74 mm
+bowl                  75.4mm   140.0mm    500 g    RCM  objects/Fluids/Bowl016/Bowl016.usd  <- pick: 75 mm
+glass_cup             90.8mm   103.2mm    200 g    RCM  objects/Fluids/GlassCup007/GlassCup007.usd  <- pick: 91 mm
+cup                   96.3mm   130.5mm    200 g    RCM  objects/Fluids/Cup012/Cup012.usd  <- pick: 96 mm
+paper_bag            104.6mm   436.0mm    100 g    RCM  objects/Linear_Objects/PaperBag/PaperBag.usd  <- pick: 105 mm
+newspaper            107.4mm   519.9mm    500 g      M  objects/Volumetric_Objects/NewsPaper002/NewsPaper002.usd  <- pick: 107 mm
+doll                 121.1mm   139.8mm     50 g      M  objects/Volumetric_Objects/Doll004/Doll004.usd  <- pick: 121 mm, within 15% of the 128.6 mm jaw -- tight
+toaster              145.0mm   241.0mm   2000 g    RCM  objects/Diverse_Manipulation_Mechanisms/Toaster_Scene/Toaster/Toaster.usd  <- TOO WIDE: 145 mm across its shortest side, jaw is 128.6 mm
+pillow               200.7mm   414.3mm     50 g      M  objects/Volumetric_Objects/Pillow004/Pillow004.usd  <- TOO WIDE: 201 mm across its shortest side, jaw is 128.6 mm
+television           263.0mm  1440.0mm  20000 g    RCM  objects/Linear_Objects/Television008/Television008.usd  <- TOO WIDE: 263 mm across its shortest side, jaw is 128.6 mm
+microwave            315.8mm 100000.0mm  10000 g    RCM  objects/Diverse_Manipulation_Mechanisms/Microwave059/Microwave059.usd  <- TOO WIDE: 316 mm across its shortest side, jaw is 128.6 mm
+toaster_oven         364.5mm  1000.0mm   3000 g    RCM  objects/Diverse_Manipulation_Mechanisms/ToasterOven009/ToasterOven009.usd  <- TOO WIDE: 364 mm across its shortest side, jaw is 128.6 mm
+quilt                468.9mm  1760.5mm     50 g      M  objects/Volumetric_Objects/Quilt002/Quilt002.usd  <- TOO WIDE: 469 mm across its shortest side, jaw is 128.6 mm
+sink                 537.7mm   874.5mm  10000 g    RCM  objects/Diverse_Manipulation_Mechanisms/Sink054/Sink054.usd  <- TOO WIDE: 538 mm across its shortest side, jaw is 128.6 mm
+washing_machine      543.4mm   838.9mm    200 g    RCM  objects/Diverse_Manipulation_Mechanisms/WashingMachine029/WashingMachine029.usd  <- TOO WIDE: 543 mm across its shortest side, jaw is 128.6 mm
+refrigerator         824.3mm  1784.4mm 100000 g    RCM  objects/Diverse_Manipulation_Mechanisms/Refrigerator066/Refrigerator066.usd  <- TOO WIDE: 824 mm across its shortest side, jaw is 128.6 mm
+----------------------------------------------------------------------------------------------------------------
+45 assets, 33 with rigid bodies, 0 with PhysX particle/deformable schemas
+
+matches simbridge.objective.LEHOME_CATALOGUE (45 named props, width and physics flag)

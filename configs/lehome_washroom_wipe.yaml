@@ -1,0 +1,83 @@
+# LeHome's washroom, one arm: pick up the sponge and put it on the towel.
+#
+#   python scripts/run.py --config configs/lehome_washroom_wipe.yaml --describe
+#   python scripts/run.py --config configs/lehome_washroom_wipe.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  ADAPTED FROM LeHome `loft_wipe`, THE ONE TASK OF THEIRS THAT IS ALREADY SINGLE-ARM
+#  LeHome wipes a water stain off a surface with a towel: the towel is a PhysX particle
+#  cloth (`GarmentObject`), the stain is a granular particle set, and the success check
+#  counts erased particles.
+#
+#  None of those three things exist here:
+#    - PhysX particle cloth is not the deformable path this repo runs. Newton's VBD
+#      solver is, and it is a different solver with different assets -- `type: cloth`,
+#      see docs/PHYSICS.md and configs/cloth.yaml.
+#    - the stain is a particle system with an action graph driving the erasure.
+#    - the success check is LeHome's, not a reward term this task has.
+#
+#  So `dish_towel` here is a FLAT STATIC MESH. It does not drape, fold, or bunch. It is
+#  a mat with a towel texture. For cloth that actually simulates, use configs/cloth.yaml.
+#
+#  What survives is the manipulation half: the sponge is a real LeHome asset, 111 x 73 x
+#  28 mm, 50 g, and it is a genuinely good size for this gripper.
+#
+#  The sponge ships as a visual mesh with a mass and no collider. simbridge defines the
+#  rigid body and a convex hull for it after the spawn -- half this library needs that,
+#  and `scripts/measure_lehome.py` records which half.
+# =====================================================================================
+
+meta:
+  name: lehome-washroom-wipe
+  notes: Adapted from LeHome loft_wipe. The towel is static scenery, not simulated cloth.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  spawn: "box(0.19, -0.12, 0.014, 0.02, 0.03, 0.0)"
+  sequence: "pick[object] place[0.24, 0.02, 0.07]"
+
+scene:
+  num_envs: 4
+  env_spacing: 1.5
+  robot:
+    type: so101_full
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    object:
+      type: lehome
+      name: sponge          # 28 mm at its narrowest, 50 g. Comfortably inside the gripper.
+      pos: [0.19, -0.12, 0.014]
+    towel:
+      type: lehome
+      name: dish_towel      # 300 x 300 mm, 5 mm thick, no physics of any kind
+      pos: [0.24, 0.02, 0.003]
+      static: true
+    toothpaste:
+      type: lehome
+      name: toothpaste      # 43 mm. Static because this asset ships two rigid bodies,
+      pos: [0.12, 0.20, 0.038]   # tube and lid, and physx warns when one RigidObject claims both.
+      static: true
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.50, -0.34, 0.32]
+      look_at: [0.21, -0.02, 0.03]
+      focal_length: 20.0
+
+sim:
+  episode_length_s: 60.0
+  lift_height: 0.045       # sponge centre rests at 14 mm
+
+control:
+  source: zero
+  action_horizon: 1

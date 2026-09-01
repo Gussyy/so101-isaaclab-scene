@@ -1,0 +1,93 @@
+# LeHome's kitchen, one arm: put the beef patty on the bun.
+#
+#   python scripts/fetch_lehome.py                                    # once, ~1.7 GB
+#   python scripts/run.py --config configs/lehome_kitchen_burger.yaml --describe
+#   python scripts/run.py --config configs/lehome_kitchen_burger.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  WHAT THIS IS ADAPTED FROM
+#  LeHome's `loft_burger_bi` (github.com/lehome-official/lehome) assembles a burger with
+#  TWO SO-101 arms on a kitchen counter inside a 4.8 GB apartment, with the bun, cheese
+#  and lettuce as PhysX volumetric deformables.
+#
+#  This is that task with one arm, on the table, with rigid parts. What changed and why
+#  is in docs/LEHOME.md -- the short version is that PhysX deformables and the second arm
+#  are not things this repo has.
+#
+#  The ASSETS are LeHome's, unmodified, straight out of their HuggingFace release.
+#
+#  SCALE. These are real-world sizes: the bun is 131 mm across, the patty 137 mm, on an
+#  arm that reaches 300 mm and whose reference cube is 25 mm. That mismatch is LeHome's
+#  too -- they drive the same SO-101 -- and the parallel gripper's 128.6 mm opening is
+#  what makes it work: the grip is across the patty's 20 mm thickness, not its diameter.
+#  The single-jaw `so101` cannot do this task; its jaw is 36 mm.
+#
+#  MASS is whatever LeHome authored: 200 g for the patty, 200 g for the bun, 500 g for
+#  the plate. Left alone rather than quietly rescaled to suit the arm. If the grasp slips,
+#  `mass: 0.05` on the object is the knob, and lying about it is the cost.
+#
+#  NOTHING HAS BEEN TRAINED ON THIS. Driven by `zero` below; use `keyboard` to try it.
+# =====================================================================================
+
+meta:
+  name: lehome-kitchen-burger
+  notes: Adapted from LeHome loft_burger_bi. Assets by LeHome; single-arm rigid version.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  # Measured resting height: the patty's origin is centred, 10 mm above its underside.
+  spawn: "box(0.22, -0.10, 0.010, 0.02, 0.03, 0.0)"
+  # Onto the bun, which sits on the plate at +y.
+  sequence: "pick[object] place[0.22, 0.10, 0.06]"
+
+scene:
+  num_envs: 4
+  env_spacing: 1.5          # the plate alone is 227 mm across
+  robot:
+    type: so101_full        # the parallel gripper. 128.6 mm open; the single jaw is 36 mm.
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    # `object` is the name the pick_place task rewards. Everything else is furniture.
+    object:
+      type: lehome
+      name: burger_patty    # 137 mm across, 20 mm thick, 200 g as authored
+      pos: [0.22, -0.10, 0.010]
+    plate:
+      type: lehome
+      name: burger_plate
+      pos: [0.22, 0.10, 0.008]
+      static: true          # 227 mm and 500 g: a target, never a payload
+    bun:
+      type: lehome
+      name: burger_bun_bottom
+      # Resting on the plate: plate top is 0.008 + 0.006 = 0.014, bun half-height 0.011.
+      pos: [0.22, 0.10, 0.025]
+    cheese:
+      type: lehome
+      name: burger_cheese   # 8 mm thick, 20 g -- the easiest thing here to grip
+      pos: [0.14, 0.19, 0.004]
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.52, -0.34, 0.34]
+      look_at: [0.20, 0.0, 0.04]
+      focal_length: 20.0
+
+sim:
+  episode_length_s: 60.0
+  # The patty's centre rests at 10 mm, so the stock 25 mm threshold is still a real lift.
+  lift_height: 0.045
+
+control:
+  source: zero
+  action_horizon: 1

@@ -211,6 +211,93 @@ def test_gripper_config() -> None:
     record("an unknown gripper key is refused", "TYPO CHECKED" in out, last)
 
 
+def test_lehome() -> None:
+    """The LeHome catalogue, and the two things that break when a USD prop replaces the cube.
+
+    Both failures found here were silent-ish: a body-name regex that stops matching because the
+    rigid body is a child prim, and a lift threshold that pays out at step 0 because a household
+    prop is taller than a 25 mm cube.
+    """
+    print("\nLeHome household assets")
+    src_code = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, '.')
+        from pathlib import Path
+        from simbridge.objective import LEHOME_CATALOGUE, graspable
+
+        paths = [p.path for p in LEHOME_CATALOGUE.values()]
+        assert len(paths) == len(set(paths)), 'duplicate asset paths'
+        assert all(p.width > 0 for p in LEHOME_CATALOGUE.values())
+        assert all(p.path.startswith('objects/') for p in LEHOME_CATALOGUE.values())
+        print('CATALOGUE', len(LEHOME_CATALOGUE))
+
+        # The parallel gripper is what makes these props usable; the single jaw is not.
+        wide = sum(1 for p in LEHOME_CATALOGUE.values() if not graspable(p.width, 0.1286)[0])
+        narrow = sum(1 for p in LEHOME_CATALOGUE.values() if not graspable(p.width, 0.0362)[0])
+        assert narrow > wide, (narrow, wide)
+        print('GRIPPER', len(LEHOME_CATALOGUE) - wide, 'of', len(LEHOME_CATALOGUE))
+
+        root = Path('assets/lehome')
+        if not root.exists():
+            print('NOASSETS')
+            raise SystemExit(0)
+        missing = [p.path for p in LEHOME_CATALOGUE.values() if not (root / p.path).exists()]
+        print('FILES' if not missing else f'MISSING {missing[:3]}')
+
+        import so101_scene  # noqa: F401
+        from simbridge.builder import build_env_cfg, load_config, relax_object_bodies
+        from simbridge.scene.builtins import lehome_usd_path
+        from simbridge.registry import register_task
+        register_task('pick_place', 'SO101-PickPlace-v0')
+
+        try:
+            lehome_usd_path('definitely_not_a_prop')
+        except KeyError as exc:
+            print('TYPO' if 'burger_patty' in str(exc) else 'TYPO NO LIST')
+        else:
+            print('TYPO ACCEPTED')
+
+        cfg = load_config('configs/lehome_livingroom_cup.yaml')
+        env_cfg = build_env_cfg(cfg, device='cuda:0', num_envs=1)
+
+        # relax_object_bodies runs inside build_env_cfg; run it again on a fresh cfg to see what
+        # it claims to touch, then assert the built cfg agrees.
+        fresh = build_env_cfg(load_config('configs/pick_place.yaml'), device='cuda:0', num_envs=1)
+        touched = relax_object_bodies(fresh, {'object'})
+        print('RELAX', len(touched), touched[:2])
+
+        from isaaclab.managers import SceneEntityCfg
+        bad = [
+            f'{n}:{k}'
+            for n, t in vars(env_cfg.events).items()
+            if isinstance(getattr(t, 'params', None), dict)
+            for k, v in t.params.items()
+            if isinstance(v, SceneEntityCfg) and v.name == 'object' and v.body_names not in (None, '.*')
+        ]
+        print('BODIES' if not bad else f'STILL PINNED {bad}')
+
+        want = cfg['sim']['lift_height']
+        got = env_cfg.rewards.lifting_object.params['minimal_height']
+        print('LIFT' if abs(got - want) < 1e-9 else f'LIFT NOT APPLIED {got} != {want}')
+        """
+    )
+    code, out = sh([PY, "-c", src_code], timeout=300)
+    # Match on whole tokens: "TYPO NO LIST" also contains "TYPO", and a substring check would
+    # pass on the failure it is meant to catch.
+    lines = {ln.split(" ")[0] for ln in out.splitlines()}
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    record("catalogue is well formed", code == 0 and "CATALOGUE" in lines, last)
+    record("the parallel gripper is what makes these props usable", "GRIPPER" in lines, last)
+    if "NOASSETS" in lines:
+        skip("[lehome] assets on disk", "run scripts/fetch_lehome.py")
+        return
+    record("every catalogued asset is on disk", "FILES" in lines, last)
+    record("an unknown prop name is refused with the list", "TYPO" in lines, last)
+    record("body-name regexes are relaxed for a USD prop", "RELAX" in lines and "BODIES" in lines, last)
+    record("sim.lift_height reaches the reward term", "LIFT" in lines, last)
+
+
 def test_registry() -> None:
     print("\nregistry")
     src = (
@@ -218,7 +305,7 @@ def test_registry() -> None:
         "import simbridge.sources, simbridge.scene;"
         "from simbridge.registry import ROBOTS, OBJECTS, CAMERAS, SOURCES;"
         "assert 'so101' in ROBOTS, ROBOTS;"
-        "assert {'cuboid','static_cuboid','usd'} <= set(OBJECTS), OBJECTS;"
+        "assert {'cuboid','static_cuboid','usd','ycb','cloth','soft_body','lehome'} <= set(OBJECTS), OBJECTS;"
         "assert 'tiled' in CAMERAS, CAMERAS;"
         "assert {'zero','random','rl_checkpoint','zmq','keyboard'} <= set(SOURCES), SOURCES;"
         "print('robots', len(ROBOTS), 'objects', len(OBJECTS), 'cameras', len(CAMERAS), 'sources', len(SOURCES))"
@@ -371,6 +458,7 @@ def main() -> None:
     test_objective_grammar()
     test_physics_selection()
     test_gripper_config()
+    test_lehome()
     test_registry()
     test_scripts_help()
     test_zmq_roundtrip()

@@ -30,7 +30,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, NamedTuple
 
 # Reachable envelope for the SO-ARM101, base at the origin. MEASURED, not estimated:
 # scripts/measure_workspace.py drives 1500 random joint configurations and reads where the
@@ -82,6 +82,104 @@ PROP_CATALOGUE: dict[str, tuple[str, float]] = {
     "wood_block": ("036_wood_block", 0.0897),
     "master_chef_can": ("002_master_chef_can", 0.1023),
     "pitcher_base": ("019_pitcher_base", 0.1331),
+}
+
+
+# ---------------------------------------------------------------------------------------------
+# LeHome household props.
+#
+# https://github.com/lehome-official/lehome ships a household asset library as a public
+# HuggingFace dataset. The USD files load here; LeHome's *code* does not (Isaac Lab 2.3, PhysX
+# particle systems, bimanual). docs/LEHOME.md is the honest account of what crossed over.
+#
+# Download with `python scripts/fetch_lehome.py`; the paths below are relative to assets/lehome/.
+#
+# Every width is MEASURED, by opening the USD: `python scripts/measure_lehome.py`, which reports
+# drift from this table. `physics` records whether the asset authors UsdPhysics.RigidBodyAPI
+# itself -- roughly half of them do not, and those need the schemas defined after spawning, the
+# same treatment the YCB props need. That is a fact about the file, not a preference, which is
+# why it lives in the table rather than in a config.
+
+
+class LehomeProp(NamedTuple):
+    """One named household asset. ``width`` is the shortest bounding-box side, in metres."""
+
+    path: str
+    width: float
+    physics: bool          # asset authors its own rigid body + colliders
+    note: str = ""
+
+
+_L = LehomeProp
+_BURGER = "objects/Volumetric_Objects/burger/Assets/"
+
+LEHOME_CATALOGUE: dict[str, LehomeProp] = {
+    # -- kitchen: the burger set, which is what LeHome's loft_burger_bi assembles -------------
+    "burger_bun_top": _L(_BURGER + "Burger_Bread001/Burger_Bread001.usd", 0.0377, True),
+    "burger_bun_bottom": _L(_BURGER + "Burger_Bread002/Burger_Bread002.usd", 0.0218, True),
+    "burger_patty": _L(_BURGER + "Burger_Beef_Patties001/Burger_Beef_Patties001.usd", 0.0199, True),
+    "burger_cheese": _L(_BURGER + "Burger_Cheese001/Burger_Cheese001.usd", 0.0082, True),
+    "burger_lettuce": _L(_BURGER + "Burger_Lettuce_Leaves001/Burger_Lettuce_Leaves001.usd", 0.0182, True),
+    "burger_tomato_slice": _L(_BURGER + "Burger_TomatoSlice001/Burger_TomatoSlice001.usd", 0.0040, True),
+    "burger_pickle": _L(_BURGER + "Burger_PickleSlice001/Burger_PickleSlice001.usd", 0.0045, True),
+    "burger_plate": _L(_BURGER + "Burger_Plate/Burger_Plate.usd", 0.0140, True, "227 mm across -- a target, not a payload"),
+    "chopping_block": _L(_BURGER + "Burger_ChoppingBlock/Burger_ChoppingBlock.usd", 0.0238, True, "465 mm long"),
+    "knife": _L(_BURGER + "Burger_Knife/Burger_Knife.usd", 0.0072, True),
+    "spatula": _L(_BURGER + "Burger_Spatula/Burger_Spatula.usd", 0.0365, True),
+    "tomato": _L(_BURGER + "Burger_Tomato001/Burger_Tomato001.usd", 0.0453, True),
+
+    # -- kitchen: other food ------------------------------------------------------------------
+    "sandwich_bread": _L("objects/Volumetric_Objects/SandwichBread014/SandwichBread014.usd", 0.0350, False),
+    "sausage": _L("objects/Volumetric_Objects/Sausage001/Sausage001.usd", 0.0325, False,
+                  "references a knife payload that ships under robots/, not objects/ -- USD warns, "
+                  "the sausage itself loads"),
+    "candy": _L("objects/Volumetric_Objects/Candy012/Candy012.usd", 0.0600, False),
+    "bagged_food": _L("objects/Volumetric_Objects/BaggedFood019/BaggedFood019.usd", 0.0400, False),
+
+    # -- tableware. LeHome pours PhysX fluid into these; we cannot, so they are things to move --
+    "bowl": _L("objects/Fluids/Bowl016/Bowl016.usd", 0.0754, True),
+    "cup": _L("objects/Fluids/Cup012/Cup012.usd", 0.0963, True),
+    "glass_cup": _L("objects/Fluids/GlassCup007/GlassCup007.usd", 0.0908, True),
+    "teapot": _L("objects/Fluids/Teapot029/Teapot029.usd", 0.0743, True),
+    "ladle": _L("objects/Fluids/GourdLadle001/GourdLadle001.usd", 0.0743, True),
+
+    # -- washroom / cleaning ------------------------------------------------------------------
+    "sponge": _L("objects/Volumetric_Objects/Sponge001/Sponge001.usd", 0.0277, False),
+    "toothpaste": _L("objects/Volumetric_Objects/Toothpaste001/Toothpaste001.usd", 0.0434, True,
+                     "ships TWO rigid bodies, tube and lid -- physx warns when it is loaded as one "
+                     "RigidObject. Use `static: true` unless you want the lid loose"),
+    "broom": _L("objects/Volumetric_Objects/DesktopBroom001/DesktopBroom001.usd", 0.0250, True),
+    "dish_towel": _L("objects/Thin-Shells/DishTowel003/DishTowel003.usd", 0.0050, False,
+                     "flat cloth mesh, no physics of any kind -- scenery here. Newton cloth is "
+                     "`type: cloth`, see docs/PHYSICS.md"),
+    "towel": _L("objects/Thin-Shells/Towel/towel.usd", 0.0071, False, "660 mm; scenery"),
+    "paper": _L("objects/Thin-Shells/Paper/PaperEN.usd", 0.0001, False, "a sheet with no thickness"),
+
+    # -- bedroom / living room ----------------------------------------------------------------
+    "pillow": _L("objects/Volumetric_Objects/Pillow004/Pillow004.usd", 0.2007, False),
+    "doll": _L("objects/Volumetric_Objects/Doll004/Doll004.usd", 0.1211, False),
+    "newspaper": _L("objects/Volumetric_Objects/NewsPaper002/NewsPaper002.usd", 0.1074, False),
+    "quilt": _L("objects/Volumetric_Objects/Quilt002/Quilt002.usd", 0.4689, False),
+    "paper_bag": _L("objects/Linear_Objects/PaperBag/PaperBag.usd", 0.1046, True),
+    "cable": _L("objects/Linear_Objects/Cable/Cable.usd", 0.0351, True, "557 mm long"),
+
+    # -- granular. LeHome simulates these as PhysX particles; the USDs are static meshes -------
+    "coffee_beans": _L("objects/Granular/CoffeeBeans001/CoffeeBeans001.usd", 0.0537, True),
+    "mung_beans": _L("objects/Granular/MungBean001/MungBean001.usd", 0.0413, True),
+    "soybeans": _L("objects/Granular/Soybean001/Soybean001.usd", 0.0603, True),
+    "red_bean": _L("objects/Granular/RedBean001/RedBean001.usd", 0.0047, True),
+
+    # -- appliances and furniture. Metres wide: backdrop, never payload. Use `static: true`. ----
+    "toaster": _L("objects/Diverse_Manipulation_Mechanisms/Toaster_Scene/Toaster/Toaster.usd", 0.1450, True),
+    "stovetop": _L("objects/Plasmas/Stovetop017/Stovetop017.usd", 0.0363, True,
+                   "669 mm long, and its flame payload is missing from the download -- USD warns"),
+    "sink": _L("objects/Diverse_Manipulation_Mechanisms/Sink054/Sink054.usd", 0.5377, True),
+    "microwave": _L("objects/Diverse_Manipulation_Mechanisms/Microwave059/Microwave059.usd", 0.3158, True,
+                    "a stray prim blows its bounding box out to 100 m; the mesh itself is fine"),
+    "refrigerator": _L("objects/Diverse_Manipulation_Mechanisms/Refrigerator066/Refrigerator066.usd", 0.8243, True),
+    "washing_machine": _L("objects/Diverse_Manipulation_Mechanisms/WashingMachine029/WashingMachine029.usd", 0.5434, True),
+    "toaster_oven": _L("objects/Diverse_Manipulation_Mechanisms/ToasterOven009/ToasterOven009.usd", 0.3645, True),
+    "television": _L("objects/Linear_Objects/Television008/Television008.usd", 0.2630, True),
 }
 
 

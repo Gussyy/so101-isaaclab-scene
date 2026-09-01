@@ -1,0 +1,81 @@
+# LeHome's kitchen, one arm: put the tomato on the chopping block.
+#
+#   python scripts/run.py --config configs/lehome_kitchen_cut.yaml --describe
+#   python scripts/run.py --config configs/lehome_kitchen_cut.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  ADAPTED FROM LeHome `loft_cut_bi`, WHICH ACTUALLY CUTS
+#  LeHome's version slices the tomato: `utils/cutMeshNode.py` rebuilds the mesh at the
+#  knife plane, bimanual, one arm holding while the other cuts. There is no mesh surgery
+#  in this repo and no second arm, so this is the honest half of that task -- bring the
+#  tomato to the board. The knife is scenery. It does not cut anything.
+#
+#  Saying so plainly matters more than the demo: a config called "cut" that quietly does
+#  not cut is worse than one that says what it is.
+#
+#  SCALE. LeHome's chopping block is 300 x 465 mm, which covers this arm's entire
+#  workspace and then some. It is at `scale: 0.5` here -- 150 x 232 mm -- which is a
+#  deliberate lie about the object's size, chosen so the scene fits a 300 mm arm.
+#  Delete the scale line to see it at LeHome's dimensions.
+# =====================================================================================
+
+meta:
+  name: lehome-kitchen-cut
+  notes: Adapted from LeHome loft_cut_bi. No mesh cutting -- the knife is scenery.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  # The tomato's origin is 32 mm above its underside; it is not a symmetric solid.
+  spawn: "box(0.20, -0.11, 0.032, 0.02, 0.03, 0.0)"
+  sequence: "pick[object] place[0.22, 0.10, 0.09]"
+
+scene:
+  num_envs: 4
+  env_spacing: 1.5
+  robot:
+    type: so101_full
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    object:
+      type: lehome
+      name: tomato          # 112 mm across, 45 mm at its narrowest, 200 g. LeHome's
+                            # Burger_Tomato001 is a HALF tomato, cut face up.
+      pos: [0.20, -0.11, 0.032]
+    board:
+      type: lehome
+      name: chopping_block
+      scale: 0.5            # see the header. LeHome ships it at 300 x 465 mm.
+      pos: [0.22, 0.10, 0.006]
+      static: true
+    knife:
+      type: lehome
+      name: knife
+      pos: [0.10, 0.21, 0.004]
+      static: true          # scenery. Nothing in this repo cuts.
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.50, -0.36, 0.36]
+      look_at: [0.20, 0.0, 0.05]
+      focal_length: 20.0
+
+sim:
+  episode_length_s: 60.0
+  # The tomato's centre already rests at 32 mm, above the task's stock 25 mm lift
+  # threshold -- leave it and `lifting_object` pays out in full at step 0, with the arm
+  # parked. Tall props do this; see simbridge.builder.apply_lift_height.
+  lift_height: 0.070
+
+control:
+  source: zero
+  action_horizon: 1

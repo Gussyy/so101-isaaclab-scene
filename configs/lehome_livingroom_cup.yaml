@@ -1,0 +1,81 @@
+# LeHome's living room, one arm: put the glass on the plate.
+#
+#   python scripts/run.py --config configs/lehome_livingroom_cup.yaml --describe
+#   python scripts/run.py --config configs/lehome_livingroom_cup.yaml --steps 0 --viz kit
+#
+# =====================================================================================
+#  ADAPTED FROM LeHome `loft_water`, WHICH POURS AND THIS DOES NOT
+#  LeHome fills a cup from a teapot using `FluidObject` -- a PhysX PBD particle fluid,
+#  configured from `livingroom/config_file/fluid.yaml`. There is no fluid solver on this
+#  repo's Newton path at all: Newton ships `SolverImplicitMPM`, Isaac Lab does not expose
+#  it through `NewtonCfg`, and nothing here has a particle fluid.
+#
+#  So the pour is gone and what is left is the part that does transfer: moving glassware
+#  accurately. The teapot is scenery.
+#
+#  THE HARD PART HERE IS THE GRIP, and it is a real result rather than a demo. The glass
+#  is 91 mm across. The single-jaw `so101` opens 36 mm and simply cannot hold it; the
+#  parallel gripper opens 128.6 mm and can, with 37 mm to spare. This config is the
+#  clearest example in the repo of the new gripper being the thing that makes a task
+#  possible rather than merely nicer.
+#
+#  Authored mass is 200 g -- thirteen reference cubes. Left as LeHome shipped it.
+# =====================================================================================
+
+meta:
+  name: lehome-livingroom-cup
+  notes: Adapted from LeHome loft_water. No fluid -- see docs/LEHOME.md.
+
+task: pick_place
+
+objective:
+  pickable: [object]
+  # The glass is 103 mm tall with a centred origin, so it rests with its origin at 51 mm.
+  spawn: "box(0.21, -0.11, 0.051, 0.02, 0.03, 0.0)"
+  sequence: "pick[object] place[0.22, 0.10, 0.11]"
+
+scene:
+  num_envs: 4
+  env_spacing: 1.5
+  robot:
+    type: so101_full        # required. The 36 mm single jaw cannot close on a 91 mm glass.
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    object:
+      type: lehome
+      name: glass_cup       # 91 mm across, 103 mm tall, 200 g
+      pos: [0.21, -0.11, 0.051]
+    coaster:
+      type: lehome
+      name: burger_plate    # LeHome's plate, doing duty as the target surface
+      pos: [0.22, 0.10, 0.008]
+      static: true
+    teapot:
+      type: lehome
+      name: teapot          # scenery. Nothing pours.
+      pos: [0.09, 0.22, 0.035]
+      static: true
+  cameras:
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [640, 480]
+      pos: [0.52, -0.36, 0.36]
+      look_at: [0.21, -0.02, 0.06]
+      focal_length: 20.0
+
+sim:
+  episode_length_s: 60.0
+  # 51 mm resting centre against a stock 25 mm threshold: without this, `lifting_object`
+  # is already fully paid at step 0 and the reward curve starts at its ceiling.
+  lift_height: 0.090
+
+control:
+  source: zero
+  action_horizon: 1
