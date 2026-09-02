@@ -64,9 +64,9 @@ def test_self_checks() -> None:
 
     # Run as a path: the package import already registered these factories, and -m would run the
     # file again into a registry that rejects duplicate names.
-    code, out = sh([PY, "simbridge/scene/builtins.py"], timeout=180)
-    record("python simbridge/scene/builtins.py", code == 0,
-           out.strip().splitlines()[-1] if out.strip() else "")
+    for path in ("simbridge/scene/builtins.py", "simbridge/sources/basic.py"):
+        code, out = sh([PY, path], timeout=180)
+        record(f"python {path}", code == 0, out.strip().splitlines()[-1] if out.strip() else "")
 
 
 def test_configs() -> None:

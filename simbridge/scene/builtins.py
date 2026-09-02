@@ -426,6 +426,14 @@ def _cloth(spec: dict[str, Any]) -> Any:
     visual = sim_utils.PreviewSurfaceCfg(diffuse_color=tuple(spec["color"])) if "color" in spec else None
 
     if "usd_path" in spec:
+        # `color` is refused rather than ignored. The garment USD carries no material to
+        # override, so the PreviewSurface is created and bound to a prim that has nothing to
+        # bind it to -- the mesh renders in the default white and the config quietly lies.
+        if "color" in spec:
+            raise ValueError(
+                "a cloth with a usd_path takes its appearance from the asset; `color` would be "
+                "created and never bound. Author the material in the USD instead."
+            )
         # An arbitrary garment mesh instead of a flat grid. No new spawner is needed:
         # spawn_from_usd already routes `deformable_props` to define_deformable_body_properties,
         # picks "surface" from the material being a SurfaceDeformableBodyMaterialBaseCfg, and

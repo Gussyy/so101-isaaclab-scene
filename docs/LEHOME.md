@@ -109,8 +109,15 @@ LeHome's shirt runs here as Newton VBD cloth, with self-collision on. The asset 
 `assets/garment/shirt.usd`, so that config needs no download; `scripts/make_garment.py`
 regenerates it from the LeHome source at any particle spacing.
 
-It is a garment that simulates and can be gripped. It is **not** LeHome's folding task — see
-Bimanual above.
+It drapes, folds and self-collides. **It cannot be picked up**, and that is measured rather
+than assumed: a scripted grasp pans the gripper over the shirt with 564 particles between the
+jaws, closes, and lifts 100 mm — and the cloth does not move by a tenth of a millimetre. Contacts
+here are per-particle and `enable_rigid_soft_full_surface_contact` is unavailable (the SO-101's
+collision meshes carry no SDF), so a thin finger closing on a sheet has nothing to pinch. Finer
+particles would help and a wider pinch surface would help more; neither is a config change.
+
+It is also **not** LeHome's folding task — see Bimanual above. Folding wants two arms; this
+arm cannot lift the cloth with one.
 
 Three findings, all measured, in [PHYSICS.md](PHYSICS.md):
 

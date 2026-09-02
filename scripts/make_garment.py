@@ -98,6 +98,23 @@ def edges_mm(pts, faces, scale: float):
     return tuple(np.percentile(lengths, [0, 50, 100]))
 
 
+def recentre(pts):
+    """Put the garment on its own origin, so a config's ``pos`` means where the shirt goes.
+
+    LeHome authors the mesh far from the origin -- far enough that spawning it at
+    ``pos: [0.22, 0, 0.08]`` put the whole shirt at y = +0.21 .. +0.40, a fifth of a metre off
+    to the side of a robot that reaches 0.30 m. The gripper then closed on air 260 steps running
+    and nothing in the scene said why: the cloth was visible, simulating, and simply somewhere
+    else. Centre x and y on the bounding box, and drop z so the lowest point is the origin --
+    then ``pos`` is a height above the table, which is what a config author means by it.
+    """
+    import numpy as np
+
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    shift = np.array([(lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, lo[2]])
+    return pts - shift, shift
+
+
 def write(path: Path, pts, faces) -> None:
     """A minimal metres-authored USD with one Mesh at /World/mesh.
 
@@ -148,10 +165,11 @@ def main() -> None:
     print(f"\n{'file':<16} {'verts':>7} {'tris':>7} {'min':>8} {'median':>8} {'max':>8}   asked")
     for spacing, out in jobs:
         p, f = remesh(pts, faces, spacing / 1000.0 / args.scale)
+        p, shift = recentre(p)
         write(out, p, f)
         lo, med, hi = edges_mm(p, f, args.scale)
         print(f"{out.name:<16} {len(p):>7} {len(f):>7} {lo:>6.2f}mm {med:>6.2f}mm {hi:>6.2f}mm"
-              f"   {spacing:g} mm")
+              f"   {spacing:g} mm   recentred by ({shift[0]:+.3f}, {shift[1]:+.3f}, {shift[2]:+.3f}) m")
 
     print("\nIn the config, particle_radius is about a quarter of the median. The solver's"
           "\nparticle_self_contact_radius must stay under the MIN -- so101_scene/pick_place_env_cfg.py.")

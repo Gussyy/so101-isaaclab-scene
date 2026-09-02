@@ -230,6 +230,33 @@ Cost is sublinear in particle count here — 4x the particles for 22% of the rat
 rigid solve and the coupling dominate at these sizes. Paying for the finer mesh is cheap until
 it isn't: 6000 particles drops to 23.8 steps/s.
 
+### The gripper cannot pick the shirt up
+
+Worth stating with numbers, because "cloth is grippable" is the easy thing to assume from a
+render. A scripted grasp (`source: keyframes`) pans the gripper over the settled shirt, descends,
+closes, and lifts 100 mm:
+
+```
+step=80   cloth_top= 12.6mm  ee=(+0.251,-0.116,+0.060)  near_jaw=564
+step=120  cloth_top= 12.5mm  ee=(+0.241,-0.111,+0.026)  near_jaw=519   <- closed
+step=220  cloth_top= 12.4mm  ee=(+0.257,-0.120,+0.125)  near_jaw=566   <- lifted 100 mm
+step=319  cloth_top= 12.4mm
+```
+
+564 particles between the jaws, and the cloth does not move by a tenth of a millimetre. The
+reason is already in this page: contacts are per-particle because
+`enable_rigid_soft_full_surface_contact` cannot be enabled without SDFs, so there is no *surface*
+between the fingers to pinch — only particles 6 mm apart, and a finger passes between them.
+
+Two other things this turned up, both stable-vs-NaN rather than subtle:
+
+- **A garment spawned on top of the robot NaNs the articulation on step 1.** Particles starting
+  inside a rigid body is not something the proxy recovers from. The shipped config spawns the
+  shirt beside the arm for that reason, and it then runs 320 steps clean.
+- **Pressing the gripper hard into the cloth also diverges**, at step 117 of a descent driving
+  the end-effector to z = 0.019. Stopping at z = 0.025 is stable. So there is a working envelope
+  for touching cloth with this arm; it just does not include holding it.
+
 ### The coupler follows the robot now
 
 `newton_vbd`'s proxy named `Robot/gripper` and `Robot/moving_jaw_so101_v1` — the single-jaw

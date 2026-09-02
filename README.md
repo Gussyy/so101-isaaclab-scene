@@ -430,8 +430,15 @@ python scripts/run.py --config configs/lehome_bedroom_shirt.yaml --steps 0 --viz
 
 ![LeHome's shirt settled on the table beside the arm, collar and sleeve folded](docs/lehome/shirt.png)
 
-It is a garment that simulates and can be gripped — **not** LeHome's folding task, which is
-bimanual. Three measured findings got it there, and the middle one is the interesting one:
+It drapes, folds and self-collides. **It cannot be picked up**, and that is measured rather
+than assumed: a scripted grasp pans the gripper over the shirt with 564 particles between the
+jaws, closes, and lifts 100 mm — and the cloth does not move by a tenth of a millimetre. Contacts
+here are per-particle and `enable_rigid_soft_full_surface_contact` is unavailable (the SO-101's
+collision meshes carry no SDF), so a thin finger closing on a sheet has nothing to pinch. Finer
+particles would help and a wider pinch surface would help more; neither is a config change.
+
+Three measured findings got the garment simulating at all, and the middle one is the
+interesting one:
 
 - the source mesh **diverges at step 7**: 14,746 vertices means 2.4 mm triangles against a 2 mm
   particle radius, so the particles start out overlapping;

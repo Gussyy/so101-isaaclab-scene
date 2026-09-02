@@ -73,14 +73,17 @@ scene:
     shirt:
       type: cloth
       usd_path: "assets/garment/shirt.usd"
-      scale: 0.25           # 1.156 m garment -> 289 mm
+      scale: 0.18           # 1.156 m garment -> 208 mm
+      # Beside the arm, not in front of it. Spawned centred, the shirt lands ON the gripper and
+      # the coupled solve NaNs the articulation on step 1 -- particles starting inside a rigid
+      # body is not something the proxy recovers from. Measured: centred at x=0.27 diverges at
+      # step 1; here it is stable for 320 steps.
       # A quarter of the 6.07 mm median edge. It does exceed the mesh's tightest 1.04 mm
       # edges, so the closest neighbours overlap slightly at rest -- stable, measured. The
       # radius that must stay under that minimum is the solver's self-contact radius, not
       # this one; see so101_scene/pick_place_env_cfg.py.
       particle_radius: 0.0015
-      pos: [0.22, 0.0, 0.08]
-      color: [0.35, 0.45, 0.85]
+      pos: [0.24, -0.16, 0.03]
   cameras:
     demo_cam:
       type: tiled
