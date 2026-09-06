@@ -498,8 +498,9 @@ python scripts/vr_gripper_server.py --no-tls                          # terminal
 python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: the sim, 55-60 steps/s (add --viz kit for a window; it halves that)
 # headset on Link: open http://localhost:8443/ in Chrome on this PC, Enter VR.
 # Two arms: the right controller drives the right arm, the left controller the left. GRIP =
-# move and turn (clutch), TRIGGER = close the jaw, A = glide back to the start pose over ~3 s,
-# B = reset the scene. Both arms start in their folded rest pose. Tilt and roll follow your
+# move and turn (clutch), TRIGGER = close the jaw. Right B / A = record an episode / end it
+# (LeRobot layout, datasets/vr_<time>). Left X = reset the scene, left Y = both arms glide
+# back to their start pose. Both arms start in their folded rest pose. Tilt and roll follow your
 # wrist; the heading is always toward where the arm reaches (5 joints). The scene is a crate
 # between the arms, a mug in front of the right one and a soup can in front of the left. Each
 # gripper carries a 170-degree wrist camera; the right one is the big panel in the headset.

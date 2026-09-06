@@ -376,6 +376,43 @@ timestamp and the second, a microsecond later, was dropped. The Quest lists the 
 controller first, so one session's logs held 1,133 engaged samples on the left driver and 91
 on the right. The gate is per frame now and both hands go out together.
 
+## The buttons, and recording in the LeRobot layout
+
+| controller | button | does |
+|---|---|---|
+| right | **B** | start recording an episode |
+| right | **A** | end the episode |
+| left | **X** | reset the scene: objects to their start, both arms to their rest pose |
+| left | **Y** | both arms glide back to their start pose |
+| either | GRIP | move and turn that arm (a clutch) |
+| either | TRIGGER | close that arm's jaw |
+
+The page sends buttons 4 and 5 of each controller as it always did; the bridge gives them
+their jobs per hand, and the drivers underneath still only know "home" and "reset". A
+recording request travels on the reply's `info` (`{"record": "start" | "stop"}`), once, and
+`run.py` does the recording — it is the process that has the joint state, the joint targets
+and the camera frames, and it writes with the same `LeRobotRecorder` that
+`scripts/collect_dataset.py` uses, so the result trains with `lerobot-train` unconverted:
+
+```
+datasets/vr_<time>/            (or run.py --dataset DIR; --task sets the language string)
+  meta/info.json               fps 50, features, counts       meta/episodes.jsonl   meta/tasks.jsonl
+  data/chunk-000/episode_000000.parquet
+  videos/chunk-000/a_wrist_right/episode_000000.mp4   videos/chunk-000/b_wrist_left/...
+```
+
+`observation.state` and `action` are twelve wide — `right_shoulder_pan` … `right_gripper`,
+then the left arm — the state being the joints as measured and the action the joint *targets*
+the IK set that step, which is what a policy trained on the data will be asked to produce.
+The images are the wrist cameras (every camera with `attach:`), at their own sizes, 50
+frames a second with the camera's 20 fps frames repeated. An episode ends on A, on a scene
+reset, or when the simulator closes; one-frame episodes are dropped. The dataset directory
+is created at the first B and its metadata rewritten after every episode, so it is valid at
+any moment.
+
+**Verified with the fake controller** (B at 1.2 s, A at 15 s, the mug pick in between):
+one episode of 449 frames at 50 fps, `observation.state` and `action` (449, 12), two videos of 449 frames each at 480×360 and 320×240, `meta/info.json` with the features above, `episodes.jsonl` and `tasks.jsonl` — the right arm's joints move through the pick in the data, the left arm's hold still, and the wrist video shows the fingers over the table.
+
 ## A camera on each gripper
 
 The view the LeRobot wrist camera gives — both finger tips in the bottom corners of a wide

@@ -26,6 +26,11 @@ parser.add_argument("--log", default="logs/vr",
                     help="directory for a per-session JSONL of every step (action, grasp pose, joints); "
                          "written whenever the driver is remote, since that is a session worth keeping")
 parser.add_argument("--no-log", action="store_true")
+parser.add_argument("--dataset", default=None,
+                    help="where the operator's recordings go, LeRobot layout (default datasets/vr_<time>); "
+                         "B on the right controller starts an episode, A ends it")
+parser.add_argument("--task", default="Pick the object up and put it in the crate",
+                    help="the language task stored with every recorded episode")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -137,6 +142,43 @@ def main() -> None:
             (("robot", "ee_frame", "ee_pose"), ("robot2", "ee_frame2", "ee_pose2"))
             if f in env.scene.keys()]
 
+    # The operator's recordings: joint state and joint targets of every arm, the wrist
+    # cameras, in the LeRobot layout -- B on the right controller opens an episode, A closes
+    # it, a scene reset closes it too. The dataset directory is made at the first B.
+    from simbridge.lerobot import JOINTS as _LEROBOT_JOINTS
+    from simbridge.lerobot_recorder import EpisodeBuffer, LeRobotRecorder
+    from so101_scene.tuning import SO101_FULL_ARM_JOINTS, SO101_FULL_FINGERS
+
+    rec_joints = list(SO101_FULL_ARM_JOINTS) + [SO101_FULL_FINGERS[0]]
+    rec_arms = []
+    for hand, (robot_, _ee, _key) in zip(("right", "left"), arms):
+        if all(j in robot_.joint_names for j in rec_joints):
+            rec_arms.append((hand, robot_, [robot_.joint_names.index(j) for j in rec_joints]))
+    rec_cams = {name: (int(spec.get("resolution", [128, 128])[1]), int(spec.get("resolution", [128, 128])[0]))
+                for name, spec in ((cfg.get("scene") or {}).get("cameras") or {}).items() if "attach" in spec}
+    rec_names = [f"{hand}_{j}" for hand, _r, _i in rec_arms for j in _LEROBOT_JOINTS]
+    recorder = None
+    episode = None
+
+    def rec_state(target: bool):
+        cols = []
+        for _hand, robot_, idx in rec_arms:
+            src_ = robot_.data.joint_pos_target if target else robot_.data.joint_pos
+            cols.append(src_.torch[0, idx].detach().cpu().numpy())
+        return np.concatenate(cols).astype(np.float32)
+
+    def rec_stop(reason: str):
+        nonlocal episode
+        if episode is None:
+            return
+        if len(episode) > 1:
+            i = recorder.add_episode(episode)
+            recorder.finalize()
+            print(f"[run] episode {i} recorded, {len(episode)} frames ({reason}) -> {recorder.root}", flush=True)
+        else:
+            print(f"[run] recording dropped: {len(episode)} frame(s) ({reason})", flush=True)
+        episode = None
+
     log = None
     if not args_cli.no_log and (cfg.get("control") or {}).get("source") == "zmq":
         import json
@@ -169,8 +211,30 @@ def main() -> None:
                 )
                 packet.state[key] = torch.cat([p_b, q_b], dim=-1).detach().cpu().numpy()
             action = source.advance(packet)
+            info = getattr(source, "last_info", None) or {}
+            if info:
+                source.last_info = {}
+                if info.get("record") == "start" and rec_arms:
+                    if recorder is None:
+                        root = args_cli.dataset or f"datasets/vr_{__import__('time').strftime('%Y%m%d-%H%M%S')}"
+                        recorder = LeRobotRecorder(root, fps=int(round(1.0 / env.step_dt)), task=args_cli.task,
+                                                   cameras=rec_cams, state_dim=len(rec_names), state_names=rec_names)
+                        print(f"[run] dataset: {recorder.root}  cameras: {list(rec_cams)}  state: {rec_names}", flush=True)
+                    rec_stop("a new episode was started")
+                    episode = EpisodeBuffer()
+                    print(f"[run] recording episode {len(recorder.episodes)} (B); A ends it", flush=True)
+                elif info.get("record") == "stop":
+                    rec_stop("A")
+            if episode is not None:
+                frames = {}
+                for name in rec_cams:
+                    rgb = env.scene[name].data.output.get("rgb")
+                    if rgb is not None:
+                        frames[name] = rgb[0, ..., :3].detach().cpu().numpy()
+                episode.add(rec_state(False), rec_state(True), frames)
             was_reset = getattr(source, "last_reset", None) is not None
             if was_reset:
+                rec_stop("scene reset")
                 # The operator asked for a fresh scene (B on the VR controller). Whole-env reset:
                 # the task's per-env reset needs ids the socket does not carry, and one env is
                 # the teleop case anyway.
@@ -200,6 +264,9 @@ def main() -> None:
                 rate = 100.0 / max(1e-9, now - rate_t0); rate_t0 = now
                 print(f"[run] step {step}  {rate:5.1f} steps/s", flush=True)
     finally:
+        rec_stop("the simulator closed")
+        if recorder is not None:
+            print(f"[run] dataset: {recorder.summary()}", flush=True)
         if log is not None:
             log.close()
         source.close()

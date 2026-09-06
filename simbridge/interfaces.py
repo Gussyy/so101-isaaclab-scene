@@ -125,6 +125,9 @@ class RemoteActionSource(ActionSource):
         #: The run loop reads and clears it. A teleop operator's "reset the scene" button lands
         #: here -- the action itself cannot say it, and it must not be lost to a chunk cache.
         self.last_reset: np.ndarray | None = None
+        #: The last reply's ``info`` when it carried one -- a teleop's "record": "start" / "stop".
+        #: The run loop reads and clears it.
+        self.last_info: dict = {}
 
     def _predict_chunk(self, obs: ObsPacket) -> np.ndarray:
         reply = self.transport.request(obs)
@@ -135,6 +138,8 @@ class RemoteActionSource(ActionSource):
             )
         if reply.reset is not None and np.any(reply.reset):
             self.last_reset = np.asarray(reply.reset, dtype=bool)
+        if reply.info:
+            self.last_info = dict(reply.info)
         return reply.action
 
     def close(self) -> None:

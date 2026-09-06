@@ -62,9 +62,12 @@ class LeRobotRecorder:
         root: Output directory.
         fps: Control rate. 50 for this environment (dt 0.01, decimation 2).
         task: Language string stored against every episode. LeRobot policies condition on it.
-        cameras: Camera names to record. Must match the keys in :attr:`ObsPacket.images`.
+        cameras: Camera names to record, or ``{name: (height, width)}`` when they differ in
+            size. Must match the keys in :attr:`ObsPacket.images`.
         state_dim: Width of the state vector; 6 joints by default.
-        image_size: ``(height, width)`` of the recorded frames.
+        image_size: ``(height, width)`` of the recorded frames, for cameras given as a list.
+        state_names: One name per state/action element; the six SO-101 joints by default.
+            Two arms record twelve, ``right_shoulder_pan`` ... ``left_gripper``.
     """
 
     def __init__(
@@ -72,16 +75,25 @@ class LeRobotRecorder:
         root: str | Path,
         fps: int = 50,
         task: str = "Pick up the cube and place it at the target",
-        cameras: list[str] | None = None,
+        cameras: list[str] | dict[str, tuple[int, int]] | None = None,
         state_dim: int = 6,
         image_size: tuple[int, int] = (128, 128),
+        state_names: list[str] | None = None,
     ) -> None:
         self.root = Path(root)
         self.fps = int(fps)
         self.task = task
-        self.cameras = list(cameras or [])
         self.state_dim = int(state_dim)
         self.image_size = tuple(image_size)
+        if isinstance(cameras, dict):
+            self.cameras = list(cameras)
+            self.image_sizes = {k: tuple(v) for k, v in cameras.items()}
+        else:
+            self.cameras = list(cameras or [])
+            self.image_sizes = {k: self.image_size for k in self.cameras}
+        self.state_names = list(state_names) if state_names else JOINTS[: self.state_dim]
+        if len(self.state_names) != self.state_dim:
+            raise ValueError(f"{len(self.state_names)} state names for a state of {self.state_dim}")
 
         (self.root / "meta").mkdir(parents=True, exist_ok=True)
         (self.root / "data" / "chunk-000").mkdir(parents=True, exist_ok=True)
@@ -98,12 +110,12 @@ class LeRobotRecorder:
             "observation.state": {
                 "dtype": "float32",
                 "shape": [self.state_dim],
-                "names": JOINTS[: self.state_dim],
+                "names": self.state_names,
             },
             "action": {
                 "dtype": "float32",
                 "shape": [self.state_dim],
-                "names": JOINTS[: self.state_dim],
+                "names": self.state_names,
             },
             "timestamp": {"dtype": "float32", "shape": [1], "names": None},
             "frame_index": {"dtype": "int64", "shape": [1], "names": None},
@@ -111,8 +123,8 @@ class LeRobotRecorder:
             "index": {"dtype": "int64", "shape": [1], "names": None},
             "task_index": {"dtype": "int64", "shape": [1], "names": None},
         }
-        h, w = self.image_size
         for cam in self.cameras:
+            h, w = self.image_sizes[cam]
             feats[f"observation.images.{cam}"] = {
                 "dtype": "video",
                 "shape": [h, w, 3],
@@ -231,6 +243,18 @@ def demo() -> None:
     assert info["fps"] == 50 and info["robot_type"] == "so101"
     assert "observation.images.scene_cam" in info["features"]
     assert info["features"]["observation.state"]["shape"] == [6]
+    # Two arms, two wrist cameras of different sizes: names and shapes come through.
+    rec2 = LeRobotRecorder(root.parent / "ds2", fps=50, cameras={"wrist_right": (36, 48), "wrist_left": (24, 32)},
+                           state_dim=12, state_names=[f"{h}_{j}" for h in ("right", "left") for j in JOINTS])
+    buf = EpisodeBuffer()
+    for _ in range(5):
+        buf.add(rng.random(12), rng.random(12), {"wrist_right": rng.integers(0, 255, (36, 48, 3), dtype=np.uint8),
+                                                  "wrist_left": rng.integers(0, 255, (24, 32, 3), dtype=np.uint8)})
+    rec2.add_episode(buf); rec2.finalize()
+    info2 = json.loads((root.parent / "ds2" / "meta" / "info.json").read_text(encoding="utf-8"))
+    assert info2["features"]["observation.state"]["names"][6] == "left_shoulder_pan"
+    assert info2["features"]["observation.images.wrist_left"]["shape"] == [24, 32, 3]
+    assert (root.parent / "ds2" / "videos" / "chunk-000" / "wrist_left" / "episode_000000.mp4").exists()
 
     eps = [json.loads(l) for l in (root / "meta" / "episodes.jsonl").read_text(encoding="utf-8").splitlines()]
     assert len(eps) == 3 and eps[0]["length"] == 10

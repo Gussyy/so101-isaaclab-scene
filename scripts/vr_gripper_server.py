@@ -20,9 +20,10 @@ Controls, on the right Touch controller:
     GRIP (squeeze)   hold to move the arm -- a clutch, like lifting a mouse. Let go and the
                      arm stays put while you reposition your hand.
     TRIGGER          close the jaw while held.
-    A / X            home: the arm glides back to its start pose (position and the way the
-                     fingers point) over a few seconds, and motion resumes from there.
-    B / Y            reset the scene: objects back to their start, arm to its rest pose.
+    Right B          start recording an episode (joint state, joint targets, wrist cameras,
+                     LeRobot layout -- run.py --dataset); right A ends it.
+    Left X           reset the scene: objects back to their start, arms to their rest pose.
+    Left Y           home: both arms glide back to their start pose over a few seconds.
 
 Frames
 ------
@@ -270,6 +271,37 @@ class VrDriver:
                             self.pages.discard(ws)
             time.sleep(max(0.0, period - (time.time() - t)))
 
+    # -- the two things a button does ---------------------------------------------------------
+    def go_home(self, raw=None) -> None:
+        """Glide back to the start pose -- position and the way the fingers point -- while the
+        controller's current position is mapped to home, so motion resumes from there without
+        a jump when the glide ends."""
+        with self._lock:
+            s = self._sample
+        if raw is None and s is not None:
+            raw = s["pos"]
+        if raw is not None:
+            self.clutch.recentre(raw)
+        if self._pos is None:
+            self._pos = self.home.copy()
+        self._glide = True
+        print(f"[vr] {self.hand}: gliding back to the start pose", flush=True)
+
+    def request_reset(self, raw=None) -> None:
+        """The scene goes back to its start on the next reply, and this arm's target with it."""
+        with self._lock:
+            s = self._sample
+        if raw is None and s is not None:
+            raw = s["pos"]
+        self._reset_pending = True
+        if raw is not None:
+            self.clutch.recentre(raw)
+        self._pos = None
+        self._q_anchor = self._q_ee_anchor = None   # re-anchor on the pose after the reset
+        self._orient_fresh = True
+        self._ee_prev = None                        # and only on a pose reported twice
+        print(f"[vr] {self.hand}: scene reset requested", flush=True)
+
     # -- from the ZeroMQ thread ----------------------------------------------------------------
     def __call__(self, obs: ObsPacket) -> np.ndarray:
         self.take_frames(obs)
@@ -324,24 +356,11 @@ class VrDriver:
                     self._q_ee_anchor = self.ee_quat if self.ee_quat is not None else self.last[3:7].copy()
             recentre = s["recentre"]
             if recentre and not self._recentre_down:    # one action per press, not per frame
-                # A: the arm goes back to its start pose slowly -- position and the way the
-                # fingers point -- while the controller's current position is mapped to home,
-                # so motion resumes from there without a jump when the glide ends.
-                self.clutch.recentre(raw)
-                if self._pos is None:
-                    self._pos = self.home.copy()
-                self._glide = True
-                print("[vr] A: gliding back to the start pose", flush=True)
+                self.go_home(raw)
             self._recentre_down = recentre
             reset = s["reset"]
-            if reset and not self._reset_down:          # B: the scene goes back to its start,
-                self._reset_pending = True              # and the target goes home with it
-                self.clutch.recentre(raw)
-                self._pos = None
-                self._q_anchor = self._q_ee_anchor = None   # re-anchor on the pose after the reset
-                self._orient_fresh = True
-                self._ee_prev = None                        # and only on a pose reported twice
-                print("[vr] B: scene reset requested", flush=True)
+            if reset and not self._reset_down:
+                self.request_reset(raw)
             self._reset_down = reset
 
             now = self._clock()
@@ -463,8 +482,9 @@ class FakeController:
         from scipy.spatial.transform import Rotation as R
 
         q = R.from_euler("y", yaw, degrees=True) * R.from_euler("x", pitch, degrees=True)
+        # Right-hand buttons: B held from 1.2 to 1.5 s starts the recording, A from 15 s ends it.
         return {"pos": [dx, 1.0 + dy, -0.4 + dz], "quat": q.as_quat().tolist(),
-                "squeeze": sq, "trigger": tr, "recentre": False}
+                "squeeze": sq, "trigger": tr, "reset": 1.2 <= t < 1.5, "recentre": t >= 15.0}
 
     def run_forever(self) -> None:
         # Hold the first pose until the simulator's first request. Isaac Sim takes ~20 s to boot,
@@ -536,6 +556,8 @@ class Bimanual:
         self.right, self.left = right, left
         self.arms = 1
         self.pages = right.pages                    # the page set the socket handler fills
+        self._down = {"right": [False, False], "left": [False, False]}   # buttons 4 and 5, per hand
+        self._record: str | None = None             # "start" / "stop", said once on the next reply
 
     @property
     def served(self) -> int:
@@ -547,7 +569,35 @@ class Bimanual:
         return getattr(self.right, name)
 
     def push(self, msg: dict) -> None:
-        (self.left if msg.get("hand") == "left" else self.right).push(msg)
+        """Route by hand, and give the four face buttons their jobs.
+
+        Right controller:  B (button 5) starts recording an episode, A (button 4) ends it.
+        Left controller:   X (button 4) resets the scene, Y (button 5) glides BOTH arms home.
+        The page sends buttons 4 and 5 as ``recentre`` / ``reset`` whichever hand they are on;
+        the drivers themselves only know "home" (recentre) and "reset", so the right hand's
+        are stripped and the left hand's are swapped to mean what the labels say.
+        """
+        hand = "left" if msg.get("hand") == "left" else "right"
+        b4, b5 = bool(msg.get("recentre", False)), bool(msg.get("reset", False))
+        was4, was5 = self._down[hand]
+        self._down[hand] = [b4, b5]
+        m = dict(msg)
+        if hand == "right":
+            if b5 and not was5:
+                self._record = "start"
+                print("[vr] B: recording an episode", flush=True)
+            if b4 and not was4:
+                self._record = "stop"
+                print("[vr] A: episode ended", flush=True)
+            m["recentre"] = m["reset"] = False
+            self.right.push(m)
+        else:
+            if b4 and not was4:
+                self.right.request_reset()          # the left driver resets itself via the swap
+            if b5 and not was5:
+                self.right.go_home()
+            m["recentre"], m["reset"] = b5, b4      # Y -> home, X -> reset, for the left driver
+            self.left.push(m)
 
     def stream_forever(self, *a, **k) -> None:
         self.right.stream_forever(*a, **k)
@@ -558,13 +608,18 @@ class Bimanual:
             print("[vr] the simulator has a second arm: the left controller drives it", flush=True)
         r = self.right(obs)
         if self.arms == 1:
-            return r
-        l = self.left(obs)
-        rp, lp = isinstance(r, ActionPacket), isinstance(l, ActionPacket)
-        act = np.concatenate([r.action if rp else r, l.action if lp else l], axis=-1)
-        if rp or lp:
-            return ActionPacket(step=obs.step, action=act, reset=(r.reset if rp else l.reset))
-        return act
+            out = r
+        else:
+            l = self.left(obs)
+            rp, lp = isinstance(r, ActionPacket), isinstance(l, ActionPacket)
+            act = np.concatenate([r.action if rp else r, l.action if lp else l], axis=-1)
+            out = ActionPacket(step=obs.step, action=act, reset=(r.reset if rp else l.reset)) if (rp or lp) else act
+        if self._record is not None:
+            if not isinstance(out, ActionPacket):
+                out = ActionPacket(step=obs.step, action=np.asarray(out, dtype=np.float32))
+            out.info = {**out.info, "record": self._record}
+            self._record = None
+        return out
 
 
 def serve_page_and_socket(driver: VrDriver, host: str, port: int, tls: bool) -> None:
@@ -651,7 +706,7 @@ def main() -> None:
         print(f"[vr] open on the Quest:  {scheme}://{shown}:{args.port}/")
         if not args.no_tls:
             print("[vr] the certificate is self-signed: accept it once (Advanced -> proceed)")
-        print("[vr] GRIP = move,  TRIGGER = close jaw,  A/X = glide home,  B/Y = reset scene")
+        print("[vr] GRIP = move,  TRIGGER = close jaw,  right B/A = record start/stop,  left X = reset scene,  left Y = both arms home")
 
     print(f"[vr] serving actions on {args.endpoint}\n")
     server = ZmqPolicyServer(driver, endpoint=args.endpoint)
@@ -798,10 +853,29 @@ def demo() -> None:
     bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1})
     a3 = bi(two)
     assert np.allclose(a3[0, 8:11], [0.11, 0, 0.14]) and a3[0, 15] == -1.0 and np.allclose(a3[0, :3], [0.11, 0, 0.09]), a3
-    bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1, "reset": True})
+    # Left X (button 4, sent as "recentre") resets the scene and both drivers' anchors; left Y
+    # (button 5, sent as "reset") glides both arms home; right B / A say record start / stop
+    # once each on the reply's info, and do not move the right arm.
+    bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1, "recentre": True})
     r3 = bi(two)
-    assert isinstance(r3, ActionPacket) and r3.action.shape == (1, 16) and bool(r3.reset.all()), "a left-hand B resets too"
-    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim, two arms")
+    assert isinstance(r3, ActionPacket) and r3.action.shape == (1, 16) and bool(r3.reset.all()), "left X resets the scene"
+    assert bi.right._q_anchor is None and bi.left._q_anchor is None, "both arms re-anchor after the reset"
+    bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1, "recentre": False}); bi(two); bi(two)
+    bi.push({"hand": "left", "pos": [0, 1.15, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1}); a_off = bi(two)
+    assert np.allclose(a_off[0, 8:11], [0.11, 0, 0.19]), a_off[0, 8:11]      # the left arm is away from home
+    bi.push({"hand": "left", "pos": [0, 1.15, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1, "reset": True}); bi(two)
+    assert bi.left._glide, "left Y glides the left arm home"
+    assert np.allclose(bi.right._pos, bi.right.home), "and the right arm, which was there already"
+    bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": True})
+    r4 = bi(two)
+    assert isinstance(r4, ActionPacket) and r4.info.get("record") == "start" and r4.reset is None, r4
+    assert not bi.right._reset_pending, "right B records; it does not reset"
+    bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": True})
+    assert not isinstance(bi(two), ActionPacket), "held B says it once"
+    bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "recentre": True})
+    r5 = bi(two)
+    assert isinstance(r5, ActionPacket) and r5.info.get("record") == "stop", r5
+    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim, two arms, buttons, record")
 
 
 if __name__ == "__main__":
