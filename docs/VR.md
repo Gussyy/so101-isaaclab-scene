@@ -19,15 +19,21 @@ writes the YAML and launches both of the above.
 | **GRIP** (hold) | move the arm. A clutch, like lifting a mouse: let go, reposition your hand, grip again — the arm stays where it was |
 | **TRIGGER** (hold) | close the jaw |
 | **A** | re-centre: the grasp point returns to `--home` |
+| **B** | reset the scene: objects back to their start, arm to its rest pose, target home |
 
-**With a Link cable, use the PC's browser instead:** `https://localhost:8443/` in Chrome or
-Edge, proceed past the certificate warning, Enter VR — the session goes to the headset through
-the Meta runtime. That is the route verified on hardware.
+**With a Link cable, use the PC's browser instead:** start the bridge with `--no-tls`, open
+`http://localhost:8443/` in Chrome or Edge, Enter VR — the session goes to the headset through
+the Meta runtime, and `localhost` is a secure context so there is no certificate step at all.
+That is the route verified on hardware.
 
-The simulation stays on the monitor. In the headset you see passthrough (the room, and the
-monitor in it) if the browser grants `immersive-ar`, otherwise a dark void; the controller is
-the only thing the headset contributes. That was the choice made up front, and it is why this
-works on Windows at all.
+**What you see in the headset is a floating screen** showing the simulator's camera — 1.2 m
+wide, 1.5 m in front of where you stood when the session began, at chest height. The first
+version showed nothing at all: passthrough is not available through Chrome over Link, so the
+`immersive-vr` fallback was a black void and the operator had to steer from the monitor. The
+frame gets there without a new socket: `run.py` attaches each declared camera's image to the
+observation packet every third step, the bridge JPEG-encodes it at up to 15 Hz and pushes it
+down the same WebSocket the controller comes up, and the page draws it on one textured quad.
+It is also drawn on the page itself, so the stream can be checked from any browser.
 
 ## Why not Isaac Lab's own XR teleop
 
@@ -118,8 +124,10 @@ session with hardware, which the bridge logged (it prints the first messages and
   ENGAGED  pos=(+0.414, +0.062, +0.186)  jaw=closed
 ```
 
-Forward (−z) came out as +x, right (+x) as −y, up as +z; GRIP is button 1 and TRIGGER is
-button 0. The simulator stepped on those actions throughout (4,600 steps, no drop — including
+Forward (−z) came out as +x, right (+x) as −y, up as +z; GRIP is button 1, TRIGGER is
+button 0, and B (button 5) reaches the simulator as `ActionPacket.reset` — a field the wire
+schema already had and nothing used: the run loop resets the environment when it sees it
+(`[run] scene reset at step 1789 (operator)`, measured). The simulator stepped on those actions throughout (4,600 steps, no drop — including
 a 20-second bridge restart mid-session, which the page and the ZeroMQ client both rode out).
 
 **The route that worked was Link, not the Quest browser.** With the headset on a Link cable,

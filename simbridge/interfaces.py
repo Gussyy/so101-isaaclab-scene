@@ -121,6 +121,10 @@ class RemoteActionSource(ActionSource):
     def __init__(self, transport: Transport, action_horizon: int = 1) -> None:
         super().__init__(action_horizon=action_horizon)
         self.transport = transport
+        #: ``(num_envs,)`` bool from the last reply, when the peer asked for a reset; else None.
+        #: The run loop reads and clears it. A teleop operator's "reset the scene" button lands
+        #: here -- the action itself cannot say it, and it must not be lost to a chunk cache.
+        self.last_reset: np.ndarray | None = None
 
     def _predict_chunk(self, obs: ObsPacket) -> np.ndarray:
         reply = self.transport.request(obs)
@@ -129,6 +133,8 @@ class RemoteActionSource(ActionSource):
                 f"driver replied to step {reply.step} while the env is at {obs.step}; "
                 "the peer is out of sync and its actions are stale"
             )
+        if reply.reset is not None and np.any(reply.reset):
+            self.last_reset = np.asarray(reply.reset, dtype=bool)
         return reply.action
 
     def close(self) -> None:

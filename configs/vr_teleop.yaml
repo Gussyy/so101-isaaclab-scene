@@ -68,6 +68,18 @@ scene:
       pos: [0.27, 0.10, 0.005]
       color: [0.30, 0.32, 0.36]
 
+  cameras:
+    # What the operator sees on the floating screen in the headset. 480x360 is deliberate:
+    # the frame rides the observation packet every third step, and this is half a megabyte.
+    # PhysX renders this at ~45 steps/s; a Newton deformable scene would not (docs/PHYSICS.md).
+    demo_cam:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      resolution: [480, 360]
+      pos: [0.62, -0.30, 0.38]
+      look_at: [0.24, 0.02, 0.06]
+      focal_length: 18.0
+
 sim:
   episode_length_s: 600.0   # teleop: nothing here is scored, so do not reset under the operator
 

@@ -119,13 +119,32 @@ def main() -> None:
     obs, _ = env.reset()
     source.reset()
     step = 0
+    # Declared cameras ride the packet too, every third step. The observation manager does not
+    # know about scene cameras unless a term names them; reading the sensor directly is five
+    # lines where an observation group would be a new config surface. Every third step because
+    # a 480x360 frame is half a megabyte of msgpack and 15 Hz is plenty for a screen.
+    cams = list(((cfg.get("scene") or {}).get("cameras") or {}).keys())
     try:
         while simulation_app.is_running():
             if args_cli.steps and step >= args_cli.steps:
                 print(f"[run] completed {step} steps")
                 break
             packet = to_packet(step, obs, env.num_envs)
+            if cams and step % 3 == 0:
+                for name in cams:
+                    rgb = env.scene[name].data.output.get("rgb")
+                    if rgb is not None:
+                        packet.images[name] = rgb[:1, ..., :3].detach().cpu().numpy()
             action = source.advance(packet)
+            if getattr(source, "last_reset", None) is not None:
+                # The operator asked for a fresh scene (B on the VR controller). Whole-env reset:
+                # the task's per-env reset needs ids the socket does not carry, and one env is
+                # the teleop case anyway.
+                source.last_reset = None
+                obs, _ = env.reset()
+                source.reset()
+                print(f"[run] scene reset at step {step} (operator)", flush=True)
+                continue
             obs, _, terminated, truncated, _ = env.step(
                 torch.as_tensor(action, device=env.device, dtype=torch.float32)
             )

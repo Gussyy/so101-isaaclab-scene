@@ -4,40 +4,54 @@
 <title>SO-101 VR bridge</title>
 <style>
   body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #14161a; color: #e8e8e8; }
-  main { max-width: 640px; margin: 0 auto; padding: 24px; }
+  main { max-width: 680px; margin: 0 auto; padding: 24px; }
   h1 { font-size: 20px; margin: 0 0 12px; }
   button { font: inherit; padding: 14px 20px; border: 0; border-radius: 8px; margin: 6px 8px 6px 0;
            background: #3b6ef5; color: white; cursor: pointer; }
-  button:disabled { background: #444; color: #999; }
   #status { margin-top: 12px; padding: 12px; background: #1f2229; border-radius: 8px;
             white-space: pre; font-family: ui-monospace, monospace; font-size: 14px; }
-  #pad { margin-top: 12px; width: 100%; height: 260px; background: #22262e; border-radius: 8px;
+  #view { margin-top: 12px; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; }
+  #pad { margin-top: 12px; width: 100%; height: 200px; background: #22262e; border-radius: 8px;
          touch-action: none; display: none; }
   small { color: #9aa; }
 </style>
 <main>
   <h1>SO-101 VR bridge</h1>
-  <p>Right controller: <b>GRIP</b> hold = move the arm &middot; <b>TRIGGER</b> = close jaw &middot; <b>A / X</b> = re-centre.</p>
+  <p>Right controller: <b>GRIP</b> hold = move the arm &middot; <b>TRIGGER</b> = close jaw &middot;
+     <b>A</b> = re-centre &middot; <b>B</b> = reset the scene. In the headset the simulator's camera floats in front of you.</p>
   <button id="vr">Enter VR</button>
   <button id="mouse">Mouse test (no headset)</button>
   <div id="status">not connected</div>
+  <canvas id="view" width="480" height="360"></canvas>
   <canvas id="pad"></canvas>
-  <p><small>Mouse test: drag = forward/left, wheel = up/down, hold <b>Space</b> = grip, hold left button while
-  pressing <b>C</b> = jaw. Sends the same messages a controller would.</small></p>
+  <p><small>Mouse test: drag = forward/left, wheel = up/down, hold <b>Space</b> = grip, <b>C</b> = jaw, <b>R</b> = re-centre, <b>B</b> = reset.
+  The picture above is the simulator's camera, live, whether or not you are in VR.</small></p>
 </main>
 <script>
-// One WebSocket, one message shape. Everything the bridge needs is in here; nothing else is sent.
-//   {pos:[x,y,z], quat:[x,y,z,w], squeeze:0..1, trigger:0..1, recentre:bool}   (WebXR local-floor frame)
+// ------------------------------------------------------------------ socket, both directions
+//   up:   {pos:[x,y,z], quat:[x,y,z,w], squeeze:0..1, trigger:0..1, recentre:bool}  (WebXR local-floor)
+//   down: binary JPEG frames of the simulator's camera
 const status = document.getElementById('status');
-let ws = null, sent = 0, lastSend = 0;
+const view = document.getElementById('view'), view2d = view.getContext('2d');
+let ws = null, sent = 0, frames = 0, lastSend = 0, lastMsg = null, lines = [];
+let latestBitmap = null, textureDirty = false;
 const SEND_HZ = 60;
 
 function connect() {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${scheme}://${location.host}/ws`);
+  ws.binaryType = 'blob';
   ws.onopen = () => log('connected');
   ws.onclose = () => { log('disconnected, retrying'); setTimeout(connect, 1000); };
   ws.onerror = () => {};
+  ws.onmessage = async (ev) => {
+    if (!(ev.data instanceof Blob)) return;
+    try {
+      const bmp = await createImageBitmap(ev.data);
+      latestBitmap = bmp; textureDirty = true; frames++;
+      view2d.drawImage(bmp, 0, 0, view.width, view.height);   // the 2D preview, always
+    } catch (e) { /* a torn frame; the next one replaces it */ }
+  };
 }
 function send(msg) {
   const now = performance.now();
@@ -45,21 +59,64 @@ function send(msg) {
   lastSend = now; sent++;
   ws.send(JSON.stringify(msg));
 }
-let lines = [];
 function log(s) { lines = [s, ...lines].slice(0, 4); render(); }
-let lastMsg = null;
+const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
 function render() {
   const m = lastMsg ? `pos ${m3(lastMsg.pos)}  grip ${lastMsg.squeeze.toFixed(1)}  trig ${lastMsg.trigger.toFixed(1)}` : '';
-  status.textContent = `${lines.join('\n')}\nsent ${sent}\n${m}`;
+  status.textContent = `${lines.join('\n')}\nsent ${sent}   frames ${frames}\n${m}`;
 }
-const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
 connect();
 
-// ---------------------------------------------------------------- WebXR
+// ------------------------------------------------------------------ a screen in WebGL
+// One textured quad. Plain WebGL because it is thirty lines and needs no library.
+const VS = `attribute vec2 p; attribute vec2 t; uniform mat4 mvp; varying vec2 v;
+            void main(){ v = t; gl_Position = mvp * vec4(p, 0.0, 1.0); }`;
+const FS = `precision mediump float; uniform sampler2D img; varying vec2 v;
+            void main(){ gl_FragColor = texture2D(img, v); }`;
+function makeScreen(gl) {
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
+  gl.linkProgram(prog);
+  // 1.2 m wide, 0.9 m tall (the camera is 4:3), centred on the origin; the model matrix places it.
+  const W = 0.6, H = 0.45;
+  const data = new Float32Array([-W,-H, 0,1,   W,-H, 1,1,   -W,H, 0,0,   W,H, 1,0]);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 2, 2, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(12).fill(40));
+  const aP = gl.getAttribLocation(prog, 'p'), aT = gl.getAttribLocation(prog, 't');
+  const uM = gl.getUniformLocation(prog, 'mvp');
+  return { draw(mvp) {
+    gl.useProgram(prog);
+    if (textureDirty && latestBitmap) {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, latestBitmap);
+      textureDirty = false;
+    }
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 16, 0);
+    gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT, 2, gl.FLOAT, false, 16, 8);
+    gl.uniformMatrix4fv(uM, false, mvp);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  } };
+}
+// Column-major 4x4 helpers, enough for projection * view * model.
+function mul4(a, b) {
+  const o = new Float32Array(16);
+  for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
+    o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+  return o;
+}
+// The screen: 1.5 m in front of where you stood when the session began, at chest height.
+const MODEL = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,1.3,-1.5,1]);
+
+// ------------------------------------------------------------------ WebXR
 async function enterVR() {
   if (!navigator.xr) { log('navigator.xr missing: not a WebXR browser'); return; }
-  // Passthrough first, so the operator can see the monitor through the headset; plain VR is the
-  // fallback and shows a dark void, which is fine -- the picture that matters is on the screen.
   let session = null, mode = 'immersive-ar';
   try { session = await navigator.xr.requestSession(mode, { requiredFeatures: ['local-floor'] }); }
   catch (e) {
@@ -72,25 +129,35 @@ async function enterVR() {
   const gl = canvas.getContext('webgl', { xrCompatible: true });
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
   const ref = await session.requestReferenceSpace('local-floor');
+  const screen = makeScreen(gl);
   session.addEventListener('end', () => log('XR session ended'));
 
   session.requestAnimationFrame(function onFrame(t, frame) {
     session.requestAnimationFrame(onFrame);
     const layer = session.renderState.baseLayer;
     gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
-    gl.clearColor(0, 0, 0, mode === 'immersive-ar' ? 0 : 1);   // transparent in passthrough
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clearColor(0.06, 0.07, 0.09, mode === 'immersive-ar' ? 0 : 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    const pose = frame.getViewerPose(ref);
+    if (pose) {
+      for (const v of pose.views) {
+        const vp = layer.getViewport(v);
+        gl.viewport(vp.x, vp.y, vp.width, vp.height);
+        screen.draw(mul4(v.projectionMatrix, mul4(v.transform.inverse.matrix, MODEL)));
+      }
+    }
     for (const src of session.inputSources) {
       if (src.handedness !== 'right' || !src.gripSpace) continue;
-      const pose = frame.getPose(src.gripSpace, ref);
-      if (!pose) continue;
-      const p = pose.transform.position, q = pose.transform.orientation;
-      const b = src.gamepad ? src.gamepad.buttons : [];
-      // xr-standard mapping: 0 trigger, 1 squeeze, 3 thumbstick, 4 = A (right) / X (left).
+      const p = frame.getPose(src.gripSpace, ref);
+      if (!p) continue;
+      const q = p.transform.orientation, b = src.gamepad ? src.gamepad.buttons : [];
+      // xr-standard mapping, confirmed on a Quest 3: 0 trigger, 1 squeeze, 4 = A / X, 5 = B / Y.
       const msg = {
-        pos: [p.x, p.y, p.z], quat: [q.x, q.y, q.z, q.w],
+        pos: [p.transform.position.x, p.transform.position.y, p.transform.position.z],
+        quat: [q.x, q.y, q.z, q.w],
         trigger: b[0] ? b[0].value : 0, squeeze: b[1] ? b[1].value : 0,
         recentre: !!(b[4] && b[4].pressed),
+        reset: !!(b[5] && b[5].pressed),
       };
       lastMsg = msg; send(msg);
     }
@@ -99,18 +166,13 @@ async function enterVR() {
 }
 document.getElementById('vr').onclick = enterVR;
 
-// ---------------------------------------------------------------- desktop mouse test
-// Drives the same message with a mouse, so the socket, the bridge and the simulator can be
-// exercised from an ordinary browser -- including the one used to test this page.
+// ------------------------------------------------------------------ desktop mouse test
 const pad = document.getElementById('pad');
-let mouse = { x: 0, y: 1.0, z: -0.4, squeeze: 0, trigger: 0, recentre: false, down: false };
-function mouseMsg() {
-  return { pos: [mouse.x, mouse.y, mouse.z], quat: [0, 0, 0, 1],
-           squeeze: mouse.squeeze, trigger: mouse.trigger, recentre: mouse.recentre };
-}
+let mouse = { x: 0, y: 1.0, z: -0.4, squeeze: 0, trigger: 0, recentre: false, reset: false, down: false };
+const mouseMsg = () => ({ pos: [mouse.x, mouse.y, mouse.z], quat: [0, 0, 0, 1],
+                          squeeze: mouse.squeeze, trigger: mouse.trigger, recentre: mouse.recentre, reset: mouse.reset });
 document.getElementById('mouse').onclick = () => {
-  pad.style.display = 'block';
-  pad.width = pad.clientWidth; pad.height = pad.clientHeight;
+  pad.style.display = 'block'; pad.width = pad.clientWidth; pad.height = pad.clientHeight;
   log('mouse test: drag on the panel');
   setInterval(() => { const m = mouseMsg(); lastMsg = m; send(m); render(); }, 1000 / SEND_HZ);
 };
@@ -118,19 +180,20 @@ pad.addEventListener('pointerdown', e => { mouse.down = true; pad.setPointerCapt
 pad.addEventListener('pointerup', () => { mouse.down = false; });
 pad.addEventListener('pointermove', e => {
   if (!mouse.down) return;
-  // Screen right = WebXR +x (operator's right); screen up = further forward (-z).
-  mouse.x += e.movementX / pad.width * 0.6;
-  mouse.z += e.movementY / pad.height * 0.6;
+  mouse.x += e.movementX / pad.width * 0.6;      // screen right = WebXR +x
+  mouse.z += e.movementY / pad.height * 0.6;     // screen up = further forward (-z)
 });
 pad.addEventListener('wheel', e => { e.preventDefault(); mouse.y -= Math.sign(e.deltaY) * 0.01; }, { passive: false });
 window.addEventListener('keydown', e => {
   if (e.code === 'Space') { mouse.squeeze = 1; e.preventDefault(); }
   if (e.code === 'KeyC') mouse.trigger = 1;
   if (e.code === 'KeyR') mouse.recentre = true;
+  if (e.code === 'KeyB') mouse.reset = true;
 });
 window.addEventListener('keyup', e => {
   if (e.code === 'Space') mouse.squeeze = 0;
   if (e.code === 'KeyC') mouse.trigger = 0;
   if (e.code === 'KeyR') mouse.recentre = false;
+  if (e.code === 'KeyB') mouse.reset = false;
 });
 </script>

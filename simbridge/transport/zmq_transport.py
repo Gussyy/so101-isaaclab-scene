@@ -105,8 +105,15 @@ class ZmqPolicyServer:
                 obs = ObsPacket.from_bytes(self._sock.recv())
             except zmq.ContextTerminated:
                 break
-            action = np.asarray(self._fn(obs), dtype=np.float32)
-            self._sock.send(ActionPacket(step=obs.step, action=action).to_bytes())
+            reply = self._fn(obs)
+            if isinstance(reply, ActionPacket):
+                # A driver that has more to say than an action -- a teleop reset, say -- returns
+                # the packet itself. The step is stamped here regardless: it is this request's.
+                reply.step = obs.step
+                reply.action = np.asarray(reply.action, dtype=np.float32)
+            else:
+                reply = ActionPacket(step=obs.step, action=np.asarray(reply, dtype=np.float32))
+            self._sock.send(reply.to_bytes())
             n += 1
             if log_every and n % log_every == 0:
                 print(f"[policy-server] {n} requests, {n / max(1e-9, time.time() - t0):.1f} req/s", flush=True)

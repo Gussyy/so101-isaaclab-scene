@@ -494,10 +494,11 @@ python scripts/run_all_tests.py --sim    # plus scene load, cameras, ZMQ-driven 
 ## VR teleop: a Quest controller drives the arm
 
 ```bash
-python scripts/vr_gripper_server.py                                   # terminal 1: the bridge
+python scripts/vr_gripper_server.py --no-tls                          # terminal 1: the bridge
 python scripts/run.py --config configs/vr_teleop.yaml --viz kit --steps 0   # terminal 2: the sim
-# on the Quest: open the https:// URL the bridge prints, accept the certificate, Enter VR.
-# GRIP = move the arm (clutch), TRIGGER = close the jaw, A = re-centre.
+# headset on Link: open http://localhost:8443/ in Chrome on this PC, Enter VR.
+# GRIP = move the arm (clutch), TRIGGER = close the jaw, A = re-centre, B = reset the scene.
+# The simulator's camera floats in front of you in the headset.
 ```
 
 The Quest's own browser reads the right controller through WebXR and streams its pose to the

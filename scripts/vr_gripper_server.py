@@ -21,6 +21,7 @@ Controls, on the right Touch controller:
                      arm stays put while you reposition your hand.
     TRIGGER          close the jaw while held.
     A / X            re-centre: the arm goes to `--home`, and motion resumes from there.
+    B / Y            reset the scene: objects back to their start, arm to its rest pose.
 
 Frames
 ------
@@ -53,7 +54,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from hand_tracker import Clutch  # noqa: E402  -- pure numpy; no cv2, no mediapipe
 
-from simbridge.schema import ObsPacket  # noqa: E402
+from simbridge.schema import ActionPacket, ObsPacket  # noqa: E402
 from simbridge.transport import ZmqPolicyServer  # noqa: E402
 
 ACTION_DIM = 8
@@ -97,6 +98,8 @@ class VrDriver:
         self._sample = None                     # latest dict from the page, in the sim frame
         self._squeezing = False
         self._recentre_down = False
+        self._reset_down = False
+        self._reset_pending = False             # B was pressed; say so on the next reply, once
         self._q_anchor = None                   # controller orientation when the clutch engaged
         self._pos = None
         self.last = np.zeros(ACTION_DIM, dtype=np.float32)
@@ -105,6 +108,8 @@ class VrDriver:
         self.last[7] = 1.0
         self.received = 0
         self.served = 0
+        self.pages: set = set()                 # live page connections, for frames going back
+        self._last_frame_t = 0.0
 
     # -- from the WebSocket thread ------------------------------------------------------------
     def push(self, msg: dict) -> None:
@@ -123,11 +128,44 @@ class VrDriver:
                 "trigger": float(msg.get("trigger", 0.0)),
                 "squeeze": float(msg.get("squeeze", 0.0)),
                 "recentre": bool(msg.get("recentre", False)),
+                "reset": bool(msg.get("reset", False)),
             }
             self.received += 1
 
+    # -- frames to the page --------------------------------------------------------------------
+    def broadcast_frame(self, obs: ObsPacket, max_hz: float = 15.0) -> None:
+        """The simulator's camera, as a JPEG, to every connected page. Best effort, rate-capped.
+
+        A screen in the headset is what makes the session usable at all -- without it the
+        operator sees black and steers from the monitor. The frame arrives on the same packet
+        the actions are answered for, so this costs one JPEG encode and no new socket.
+        """
+        if not obs.images or not self.pages:
+            return
+        now = time.time()
+        if now - self._last_frame_t < 1.0 / max_hz:
+            return
+        self._last_frame_t = now
+        import io as _io
+
+        from PIL import Image
+
+        arr = next(iter(obs.images.values()))
+        arr = np.asarray(arr)
+        if arr.ndim == 4:
+            arr = arr[0]
+        buf = _io.BytesIO()
+        Image.fromarray(np.ascontiguousarray(arr[..., :3]).astype(np.uint8)).save(buf, "JPEG", quality=70)
+        data = buf.getvalue()
+        for ws in list(self.pages):
+            try:
+                ws.send(data)                      # binary frame; the page draws it on the screen
+            except Exception:  # noqa: BLE001  -- a page that went away is dropped by its handler
+                self.pages.discard(ws)
+
     # -- from the ZeroMQ thread ----------------------------------------------------------------
     def __call__(self, obs: ObsPacket) -> np.ndarray:
+        self.broadcast_frame(obs)
         with self._lock:
             s = self._sample
         if s is not None:
@@ -142,6 +180,13 @@ class VrDriver:
                 self.clutch.recentre(raw)
                 self._pos = None
             self._recentre_down = recentre
+            reset = s["reset"]
+            if reset and not self._reset_down:          # B: the scene goes back to its start,
+                self._reset_pending = True              # and the target goes home with it
+                self.clutch.recentre(raw)
+                self._pos = None
+                print("[vr] B: scene reset requested", flush=True)
+            self._reset_down = reset
 
             out = self.clutch.update(raw)
             self._pos = out if self._pos is None or self.smooth >= 1.0 else (
@@ -165,7 +210,11 @@ class VrDriver:
             print(f"\r  {state:<8} pos=({x:+.3f}, {y:+.3f}, {z:+.3f})  "
                   f"jaw={'closed' if self.last[7] < 0 else 'open  '}  "
                   f"page msgs={self.received}   ", end="", flush=True)
-        return np.tile(self.last, (obs.num_envs, 1)).astype(np.float32)
+        action = np.tile(self.last, (obs.num_envs, 1)).astype(np.float32)
+        if self._reset_pending:
+            self._reset_pending = False
+            return ActionPacket(step=obs.step, action=action, reset=np.ones(obs.num_envs, dtype=bool))
+        return action
 
 
 class FakeController:
@@ -285,13 +334,17 @@ def serve_page_and_socket(driver: VrDriver, host: str, port: int, tls: bool) -> 
 
     def handler(ws):
         print(f"\n[vr] page connected from {ws.remote_address[0]}", flush=True)
+        driver.pages.add(ws)
         try:
             for raw in ws:
+                if isinstance(raw, bytes):
+                    continue                        # the page sends text only; frames go the other way
                 try:
                     driver.push(json.loads(raw))
                 except (ValueError, KeyError, TypeError) as exc:
                     print(f"\n[vr] bad message ignored: {exc}", flush=True)
         finally:
+            driver.pages.discard(ws)
             print("\n[vr] page disconnected; holding the last pose", flush=True)
 
     ctx = None
@@ -336,7 +389,7 @@ def main() -> None:
         print(f"[vr] open on the Quest:  {scheme}://{shown}:{args.port}/")
         if not args.no_tls:
             print("[vr] the certificate is self-signed: accept it once (Advanced -> proceed)")
-        print("[vr] GRIP = move,  TRIGGER = close jaw,  A/X = re-centre")
+        print("[vr] GRIP = move,  TRIGGER = close jaw,  A/X = re-centre,  B/Y = reset scene")
 
     print(f"[vr] serving actions on {args.endpoint}\n")
     server = ZmqPolicyServer(driver, endpoint=args.endpoint)
@@ -381,8 +434,26 @@ def demo() -> None:
     d(obs)
     d.push({"pos": [5, 5, 5], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0})
     assert np.allclose(d(obs)[0, :3], [0.3, 0.0, 0.15]), "released: the arm must stay put"
+    # B: exactly one reply carries reset=True, and the target goes home with it.
+    d.push({"pos": [5, 5, 5], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": True})
+    r = d(obs)
+    assert isinstance(r, ActionPacket) and bool(r.reset.all()) and np.allclose(r.action[0, :3], [0.2, 0.0, 0.15]), r
+    assert not isinstance(d(obs), ActionPacket), "held B must not reset again"
+    d.push({"pos": [5, 5, 5], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": False})
+    assert not isinstance(d(obs), ActionPacket)
     assert FakeController(d).sample(4.5)["trigger"] == 1.0
-    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold")
+
+    # A frame on the packet reaches every page as a JPEG; no page, no encode.
+    class _Page:
+        def __init__(self): self.got = []
+        def send(self, data): self.got.append(data)
+    page = _Page(); d.pages.add(page); d._last_frame_t = 0.0
+    frame = np.zeros((1, 12, 16, 3), dtype=np.uint8); frame[..., 0] = 200
+    d(ObsPacket(step=1, num_envs=1, state={}, images={"cam": frame}))
+    assert len(page.got) == 1 and page.got[0][:2] == b"\xff\xd8", "expected one JPEG"
+    d(ObsPacket(step=2, num_envs=1, state={}, images={"cam": frame}))
+    assert len(page.got) == 1, "rate cap: no second frame within 1/15 s"
+    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, screen, reset")
 
 
 if __name__ == "__main__":
