@@ -82,7 +82,7 @@ def make_source(ctl: dict, action_dim: int, device: str):
     """Instantiate the driver named by control.source."""
     name = ctl.get("source", "zero")
     factory = lookup(SOURCES, name, "action source")
-    kwargs = {k: v for k, v in ctl.items() if k not in {"source", "transport"}}
+    kwargs = {k: v for k, v in ctl.items() if k not in {"source", "transport", "actions", "ik_orientation_weight"}}
     kwargs.setdefault("action_dim", action_dim)
     kwargs.setdefault("device", device)
     return factory(**kwargs)

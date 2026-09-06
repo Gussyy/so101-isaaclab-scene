@@ -15,3 +15,5 @@ datasets/
 assets/lehome/
 assets/garment/shirt_*mm.usd
 .hand/
+scripts/vr/*.pem
+configs/gui_scene.yaml

@@ -112,7 +112,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | robots | `so101`, `so101_full` |
 | objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `cloth`, `soft_body`, `light` |
 | cameras | `tiled` |
-| sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `gripper_cycle`, `zmq` |
+| sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `keyframes`, `gripper_cycle`, `zmq` |
 
 Add your own:
 
@@ -490,6 +490,44 @@ Full guide: [docs/LEROBOT.md](docs/LEROBOT.md).
 python scripts/run_all_tests.py          # fast tier, no simulator, ~20s
 python scripts/run_all_tests.py --sim    # plus scene load, cameras, ZMQ-driven run
 ```
+
+## VR teleop: a Quest controller drives the arm
+
+```bash
+python scripts/vr_gripper_server.py                                   # terminal 1: the bridge
+python scripts/run.py --config configs/vr_teleop.yaml --viz kit --steps 0   # terminal 2: the sim
+# on the Quest: open the https:// URL the bridge prints, accept the certificate, Enter VR.
+# GRIP = move the arm (clutch), TRIGGER = close the jaw, A = re-centre.
+```
+
+The Quest's own browser reads the right controller through WebXR and streams its pose to the
+bridge; the bridge turns that into the same 8-wide `[x, y, z, quat, jaw]` action the webcam
+hand tracker already sends, and a new `control.actions: ik` makes the arm follow it. The sim
+stays on the monitor — Isaac Lab's own XR teleop is **Linux-only**, and this is the route that
+works on Windows.
+
+Measured with a scripted controller, no headset: the arm tracks the commanded grasp point to
+**4–20 mm** inside its reach, closes on a 70 mm block, lifts it 31 mm and carries it — then
+drops it on its side partway. That is position-only IK; with any orientation constraint, five
+joints chasing a 6-DoF pose park at a joint limit 150–220 mm off, and this arm physically
+cannot point its jaws down below 0.22 m anyway. [docs/VR.md](docs/VR.md) has every setting
+tried and the posture grid that proves the last point.
+
+**Verified without a headset:** the bridge's frame mapping, clutch and jaw; the page → WebSocket →
+bridge → ZeroMQ path (2,299 messages counted from a browser's mouse mode); HTTPS with the
+generated certificate; the IK wiring. **Not verified:** the page inside the Quest browser itself
+— no headset was attached while this was built. That one row is called out in the doc.
+
+### Set the scene up in a window first
+
+```bash
+python scripts/scene_gui.py                       # or: python scripts/scene_gui.py configs/vr_teleop.yaml
+```
+
+Robot, physics, objects with positions, control source, IK on/off, camera — every control is
+one key of the YAML the builder already takes. Start writes `configs/gui_scene.yaml`, launches
+`run.py` on it in its own console, and starts the VR bridge alongside if asked. It fills in the
+robot's base rotation itself, since that sign was got wrong twice by hand.
 
 ## Keyboard teleop
 

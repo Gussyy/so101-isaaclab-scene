@@ -1,0 +1,136 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SO-101 VR bridge</title>
+<style>
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #14161a; color: #e8e8e8; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  button { font: inherit; padding: 14px 20px; border: 0; border-radius: 8px; margin: 6px 8px 6px 0;
+           background: #3b6ef5; color: white; cursor: pointer; }
+  button:disabled { background: #444; color: #999; }
+  #status { margin-top: 12px; padding: 12px; background: #1f2229; border-radius: 8px;
+            white-space: pre; font-family: ui-monospace, monospace; font-size: 14px; }
+  #pad { margin-top: 12px; width: 100%; height: 260px; background: #22262e; border-radius: 8px;
+         touch-action: none; display: none; }
+  small { color: #9aa; }
+</style>
+<main>
+  <h1>SO-101 VR bridge</h1>
+  <p>Right controller: <b>GRIP</b> hold = move the arm &middot; <b>TRIGGER</b> = close jaw &middot; <b>A / X</b> = re-centre.</p>
+  <button id="vr">Enter VR</button>
+  <button id="mouse">Mouse test (no headset)</button>
+  <div id="status">not connected</div>
+  <canvas id="pad"></canvas>
+  <p><small>Mouse test: drag = forward/left, wheel = up/down, hold <b>Space</b> = grip, hold left button while
+  pressing <b>C</b> = jaw. Sends the same messages a controller would.</small></p>
+</main>
+<script>
+// One WebSocket, one message shape. Everything the bridge needs is in here; nothing else is sent.
+//   {pos:[x,y,z], quat:[x,y,z,w], squeeze:0..1, trigger:0..1, recentre:bool}   (WebXR local-floor frame)
+const status = document.getElementById('status');
+let ws = null, sent = 0, lastSend = 0;
+const SEND_HZ = 60;
+
+function connect() {
+  const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${scheme}://${location.host}/ws`);
+  ws.onopen = () => log('connected');
+  ws.onclose = () => { log('disconnected, retrying'); setTimeout(connect, 1000); };
+  ws.onerror = () => {};
+}
+function send(msg) {
+  const now = performance.now();
+  if (!ws || ws.readyState !== 1 || now - lastSend < 1000 / SEND_HZ) return;
+  lastSend = now; sent++;
+  ws.send(JSON.stringify(msg));
+}
+let lines = [];
+function log(s) { lines = [s, ...lines].slice(0, 4); render(); }
+let lastMsg = null;
+function render() {
+  const m = lastMsg ? `pos ${m3(lastMsg.pos)}  grip ${lastMsg.squeeze.toFixed(1)}  trig ${lastMsg.trigger.toFixed(1)}` : '';
+  status.textContent = `${lines.join('\n')}\nsent ${sent}\n${m}`;
+}
+const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
+connect();
+
+// ---------------------------------------------------------------- WebXR
+async function enterVR() {
+  if (!navigator.xr) { log('navigator.xr missing: not a WebXR browser'); return; }
+  // Passthrough first, so the operator can see the monitor through the headset; plain VR is the
+  // fallback and shows a dark void, which is fine -- the picture that matters is on the screen.
+  let session = null, mode = 'immersive-ar';
+  try { session = await navigator.xr.requestSession(mode, { requiredFeatures: ['local-floor'] }); }
+  catch (e) {
+    mode = 'immersive-vr';
+    try { session = await navigator.xr.requestSession(mode, { requiredFeatures: ['local-floor'] }); }
+    catch (e2) { log('requestSession failed: ' + e2.message); return; }
+  }
+  log('XR session: ' + mode);
+  const canvas = document.createElement('canvas');
+  const gl = canvas.getContext('webgl', { xrCompatible: true });
+  session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
+  const ref = await session.requestReferenceSpace('local-floor');
+  session.addEventListener('end', () => log('XR session ended'));
+
+  session.requestAnimationFrame(function onFrame(t, frame) {
+    session.requestAnimationFrame(onFrame);
+    const layer = session.renderState.baseLayer;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, layer.framebuffer);
+    gl.clearColor(0, 0, 0, mode === 'immersive-ar' ? 0 : 1);   // transparent in passthrough
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    for (const src of session.inputSources) {
+      if (src.handedness !== 'right' || !src.gripSpace) continue;
+      const pose = frame.getPose(src.gripSpace, ref);
+      if (!pose) continue;
+      const p = pose.transform.position, q = pose.transform.orientation;
+      const b = src.gamepad ? src.gamepad.buttons : [];
+      // xr-standard mapping: 0 trigger, 1 squeeze, 3 thumbstick, 4 = A (right) / X (left).
+      const msg = {
+        pos: [p.x, p.y, p.z], quat: [q.x, q.y, q.z, q.w],
+        trigger: b[0] ? b[0].value : 0, squeeze: b[1] ? b[1].value : 0,
+        recentre: !!(b[4] && b[4].pressed),
+      };
+      lastMsg = msg; send(msg);
+    }
+    if (sent % 30 === 0) render();
+  });
+}
+document.getElementById('vr').onclick = enterVR;
+
+// ---------------------------------------------------------------- desktop mouse test
+// Drives the same message with a mouse, so the socket, the bridge and the simulator can be
+// exercised from an ordinary browser -- including the one used to test this page.
+const pad = document.getElementById('pad');
+let mouse = { x: 0, y: 1.0, z: -0.4, squeeze: 0, trigger: 0, recentre: false, down: false };
+function mouseMsg() {
+  return { pos: [mouse.x, mouse.y, mouse.z], quat: [0, 0, 0, 1],
+           squeeze: mouse.squeeze, trigger: mouse.trigger, recentre: mouse.recentre };
+}
+document.getElementById('mouse').onclick = () => {
+  pad.style.display = 'block';
+  pad.width = pad.clientWidth; pad.height = pad.clientHeight;
+  log('mouse test: drag on the panel');
+  setInterval(() => { const m = mouseMsg(); lastMsg = m; send(m); render(); }, 1000 / SEND_HZ);
+};
+pad.addEventListener('pointerdown', e => { mouse.down = true; pad.setPointerCapture(e.pointerId); });
+pad.addEventListener('pointerup', () => { mouse.down = false; });
+pad.addEventListener('pointermove', e => {
+  if (!mouse.down) return;
+  // Screen right = WebXR +x (operator's right); screen up = further forward (-z).
+  mouse.x += e.movementX / pad.width * 0.6;
+  mouse.z += e.movementY / pad.height * 0.6;
+});
+pad.addEventListener('wheel', e => { e.preventDefault(); mouse.y -= Math.sign(e.deltaY) * 0.01; }, { passive: false });
+window.addEventListener('keydown', e => {
+  if (e.code === 'Space') { mouse.squeeze = 1; e.preventDefault(); }
+  if (e.code === 'KeyC') mouse.trigger = 1;
+  if (e.code === 'KeyR') mouse.recentre = true;
+});
+window.addEventListener('keyup', e => {
+  if (e.code === 'Space') mouse.squeeze = 0;
+  if (e.code === 'KeyC') mouse.trigger = 0;
+  if (e.code === 'KeyR') mouse.recentre = false;
+});
+</script>

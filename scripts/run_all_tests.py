@@ -369,6 +369,67 @@ def test_garment() -> None:
     record("an unknown light kind is refused", "LIGHT" in lines, last)
 
 
+def test_vr_teleop() -> None:
+    """The VR chain, minus the headset: bridge self-check, GUI self-check, IK wiring."""
+    print("\nVR teleop")
+    for path, label in (("scripts/vr_gripper_server.py", "bridge: frames, clutch, jaw, hold"),
+                        ("scripts/scene_gui.py", "scene GUI: round-trip, refuses duplicates")):
+        code, out = sh([PY, path, "--demo"], timeout=180)
+        record(label, code == 0, out.strip().splitlines()[-1] if out.strip() else "")
+
+    src_code = textwrap.dedent(
+        """
+        import sys
+        sys.path.insert(0, '.')
+        import so101_scene  # noqa: F401
+        from simbridge.builder import build_env_cfg, load_config
+        from simbridge.registry import register_task
+        register_task('pick_place', 'SO101-PickPlace-v0')
+
+        cfg = load_config('configs/vr_teleop.yaml')
+        env_cfg = build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        a = env_cfg.actions.arm_action
+        ok = (type(a).__name__ == 'DifferentialInverseKinematicsActionCfg' and a.body_name == 'gripper_base'
+              and tuple(a.body_offset.pos) == (0.0, -0.0748, 0.0) and len(a.joint_names) == 5)
+        print('IKWIRED' if ok else f'IK WRONG {a}')
+
+        cfg['scene']['robot']['type'] = 'so101'
+        cfg['scene']['robot']['rot'] = [0.0, 0.0, 0.70710678, 0.70710678]
+        cfg['scene']['robot']['joint_pos']['gripper'] = 0.0
+        try:
+            build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        except ValueError as exc:
+            print('REFUSED' if 'so101_full' in str(exc) else f'WRONG ERROR {exc}')
+        else:
+            print('SINGLE JAW ACCEPTED')
+
+        cfg = load_config('configs/vr_teleop.yaml')
+        cfg['control']['ik_orientation_weight'] = [1.0, 1.0, 0.0]
+        w = build_env_cfg(cfg, device='cuda:0', num_envs=1).actions.arm_action.controller.orientation_weight
+        print('WEIGHT' if w == (1.0, 1.0, 0.0) else f'WEIGHT WRONG {w}')
+        cfg['control']['ik_orientation_weight'] = [1.0, 1.0]
+        try:
+            build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        except ValueError:
+            print('CMDCHECKED')
+        else:
+            print('BAD WEIGHT ACCEPTED')
+        """
+    )
+    code, out = sh([PY, "-c", src_code], timeout=300)
+    lines = {ln.split(" ")[0] for ln in out.splitlines()}
+    last = out.strip().splitlines()[-1] if out.strip() else ""
+    record("control.actions: ik wires task-space IK to the grasp point", code == 0 and "IKWIRED" in lines, last)
+    record("IK is refused for the single-jaw robot", "REFUSED" in lines, last)
+    record("ik_orientation_weight takes a per-axis triple", "WEIGHT" in lines, last)
+    record("a malformed orientation weight is refused", "CMDCHECKED" in lines, last)
+
+    # The page the Quest opens: exists, and speaks the one message shape the bridge parses.
+    page = (REPO / "scripts/vr/index.html").read_text(encoding="utf-8")
+    keys = all(k in page for k in ("pos:", "quat:", "trigger:", "squeeze:", "recentre:"))
+    record("WebXR page sends the bridge's message shape", keys and "gripSpace" in page and "local-floor" in page)
+
+
 def test_registry() -> None:
     print("\nregistry")
     src = (
@@ -378,7 +439,7 @@ def test_registry() -> None:
         "assert 'so101' in ROBOTS, ROBOTS;"
         "assert {'cuboid','static_cuboid','usd','ycb','cloth','soft_body','lehome','light'} <= set(OBJECTS), OBJECTS;"
         "assert 'tiled' in CAMERAS, CAMERAS;"
-        "assert {'zero','random','rl_checkpoint','zmq','keyboard'} <= set(SOURCES), SOURCES;"
+        "assert {'zero','random','rl_checkpoint','zmq','keyboard','keyframes'} <= set(SOURCES), SOURCES;"
         "print('robots', len(ROBOTS), 'objects', len(OBJECTS), 'cameras', len(CAMERAS), 'sources', len(SOURCES))"
     )
     code, out = sh([PY, "-c", src], timeout=120)
@@ -531,6 +592,7 @@ def main() -> None:
     test_gripper_config()
     test_lehome()
     test_garment()
+    test_vr_teleop()
     test_registry()
     test_scripts_help()
     test_zmq_roundtrip()

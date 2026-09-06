@@ -1,0 +1,87 @@
+# Drive the SO-101 from a VR controller: the arm follows the controller's pose through IK.
+#
+#   # terminal 1 -- the bridge (serves the WebXR page and turns controller poses into actions)
+#   python scripts/vr_gripper_server.py
+#
+#   # terminal 2 -- the simulator, watching the monitor
+#   python scripts/run.py --config configs/vr_teleop.yaml --viz kit --steps 0
+#
+#   # on the Quest: open the URL the bridge prints, accept the certificate once, Enter VR.
+#   # Hold GRIP to move the arm (clutch), TRIGGER closes the jaw, A/X re-centres.
+#
+#   # no headset yet? the same chain, driven by a scripted controller:
+#   python scripts/vr_gripper_server.py --fake
+#
+# =====================================================================================
+#  WHAT THIS IS
+#  `control.actions: ik` swaps the task's five joint offsets for one grasp-point pose:
+#  the action is [x, y, z, qx, qy, qz, qw, jaw], eight wide, in the robot's root frame --
+#  the same layout scripts/floating_gripper.py already takes from the webcam hand tracker.
+#  The VR bridge is one more thing on that socket. Nothing else changed.
+#
+#  MEASURED with the scripted controller (--fake): 4-20 mm tracking inside the arm's reach;
+#  the block below is closed on, lifted 31 mm and carried, then dropped on its side partway.
+#  The chain works; not every pick succeeds. docs/VR.md.
+#
+#  Rigid and PhysX, on purpose. This is the scene where rendering is cheap (45.6 steps/s
+#  with a 640x480 camera); a Newton deformable scene renders at 1.9 and is not
+#  teleoperable. docs/PHYSICS.md.
+#
+#  UNVERIFIED UNTIL A HEADSET IS PLUGGED IN: the WebXR page in the Quest's own browser.
+#  Everything downstream of it -- the socket, the frame conversion, the clutch, the IK,
+#  the arm -- is exercised by `--fake` and by the page's desktop mouse mode. docs/VR.md
+#  says exactly which line is the untested one.
+# =====================================================================================
+
+meta:
+  name: so101-vr-teleop
+  notes: Controller pose -> IK -> arm. The Quest page itself is untested until a headset is on.
+
+task: pick_place
+
+scene:
+  num_envs: 1
+  env_spacing: 1.0
+  robot:
+    type: so101_full        # the parallel gripper; IK is wired for this robot only
+    rot: [0.0, 0.0, 0.0, 1.0]
+    joint_pos:
+      shoulder_pan: 0.0
+      shoulder_lift: -0.6
+      elbow_flex: 0.8
+      wrist_flex: 0.6
+      wrist_roll: 0.0
+  objects:
+    object:
+      type: cuboid
+      # Sized for THIS gripper and THIS arm, both measured: the parallel fingers close to
+      # 56 mm, so anything narrower is never gripped; and the grasp point cannot get below
+      # about 60 mm at table reach, so the block has to be tall enough to be met there.
+      # A 30 mm cube fails on both counts, and did.
+      size: [0.07, 0.07, 0.09]
+      mass: 0.05
+      pos: [0.27, 0.0, 0.045]    # 0.27 m out, where this arm reaches table height -- see header
+      color: [0.90, 0.35, 0.20]
+    tray:
+      type: static_cuboid
+      size: [0.12, 0.12, 0.01]
+      pos: [0.27, 0.10, 0.005]
+      color: [0.30, 0.32, 0.36]
+
+sim:
+  episode_length_s: 600.0   # teleop: nothing here is scored, so do not reset under the operator
+
+control:
+  source: zmq               # the VR bridge answers on this socket
+  endpoint: "tcp://127.0.0.1:5555"
+  actions: ik               # pose target, not joint offsets -- see the header
+  # MEASURED, fake controller, 1100 steps, error between the commanded and actual grasp point:
+  #     orientation weight 1.0 (full pose)      mean 224 mm   stuck at a joint limit
+  #     orientation weight 0.2                  mean 161 mm   stuck
+  #     orientation weight [1, 1, 0]            mean 159 mm   stuck
+  #     orientation weight 0.0                  mean  19 mm,  12.5 mm once settled
+  # Five joints cannot hold a commanded 6-DoF orientation across this workspace, and DLS
+  # trades position away trying. So the arm follows the controller's POSITION and the jaws'
+  # orientation follows the arm. docs/VR.md has the table and what that costs at the table.
+  ik_orientation_weight: 0.0
+  action_horizon: 1

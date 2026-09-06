@@ -480,6 +480,63 @@ def relax_object_bodies(env_cfg, names: set[str]) -> list[str]:
     return touched
 
 
+def _weight(w):
+    if isinstance(w, (int, float)):
+        return float(w)
+    w = tuple(float(v) for v in w)
+    if len(w) != 3:
+        raise ValueError(f"control.ik_orientation_weight must be a number or three numbers, got {w}")
+    return w
+
+
+def apply_ik_actions(env_cfg, robot_type: str | None, orientation_weight=None) -> int:
+    """Drive the arm in task space: the action becomes a grasp-point pose, not five joint offsets.
+
+    ``control.actions: ik`` swaps the task's ``JointPositionAction`` for Isaac Lab's
+    ``DifferentialInverseKinematicsAction``. The action is then ``[x, y, z, qx, qy, qz, qw]`` in
+    the robot's root frame plus the binary jaw -- eight wide, which is exactly the layout the
+    webcam and VR bridges already send to the floating gripper. So the same socket that flies a
+    gripper with no arm now drives the arm.
+
+    Isaac Lab 3.0 takes the quaternion as (x, y, z, w): the controller's identity fallback is
+    ``[0, 0, 0, 1]`` (``controllers/differential_ik.py``). Do not roll it.
+
+    Only ``so101_full`` for now. The single-jaw robot's end-effector body and grasp offset are
+    different measured numbers, and nothing here has been checked against them.
+    """
+    if robot_type != "so101_full":
+        raise ValueError(
+            f"control.actions: ik is only wired for 'so101_full', not {robot_type!r}. The IK "
+            "target is the parallel gripper's grasp point; the single jaw's is a different body."
+        )
+    from isaaclab.controllers import DifferentialIKControllerCfg
+    from isaaclab.envs.mdp.actions import DifferentialInverseKinematicsActionCfg as IK
+
+    from so101_scene.tuning import SO101_FULL_ARM_JOINTS, SO101_FULL_EE_BODY, SO101_FULL_GRASP_OFFSET
+
+    env_cfg.actions.arm_action = IK(
+        asset_name="robot",
+        joint_names=list(SO101_FULL_ARM_JOINTS),
+        body_name=SO101_FULL_EE_BODY,
+        # The command names the grasp point between the fingers, not the gripper_base origin --
+        # the same 74.8 mm the ee_frame uses, so a target on the cube is a target on the cube.
+        body_offset=IK.OffsetCfg(pos=tuple(SO101_FULL_GRASP_OFFSET)),
+        # Absolute pose, damped least squares. Five joints cannot meet an arbitrary 6-DoF pose;
+        # DLS finds the nearest, which is what a teleop target wants.
+        # Always "pose": position-only would make the action 4 wide and break the 8-wide socket
+        # contract. Orientation freedom is expressed through the weight instead -- a scalar, or
+        # one per root-frame axis: `[1, 1, 0]` holds the tilt and frees the yaw, which is what a
+        # five-joint arm can actually do.
+        controller=DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="dls",
+            **({"orientation_weight": _weight(orientation_weight)} if orientation_weight is not None else {}),
+        ),
+        scale=1.0,
+        debug_vis=True,        # draws the target and the current grasp frame -- teleop wants it
+    )
+    return 7 + 1
+
+
 def apply_lift_height(env_cfg, height: float) -> list[str]:
     """Raise the height at which the task counts the object as lifted, and return what changed.
 
@@ -533,6 +590,14 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
         env_cfg.scene.robot = lookup(ROBOTS, robot["type"], "robot")(robot)
         apply_robot_wiring(env_cfg, robot)
 
+    actions = (cfg.get("control") or {}).get("actions", "joint")
+    if actions == "ik":
+        ctl = cfg.get("control") or {}
+        apply_ik_actions(env_cfg, (scene_spec.get("robot") or {}).get("type"),
+                         orientation_weight=ctl.get("ik_orientation_weight"))
+    elif actions != "joint":
+        raise ValueError(f"control.actions must be 'joint' or 'ik', got {actions!r}")
+
     objects = scene_spec.get("objects") or {}
     for name, spec in objects.items():
         spec = {**spec, "prim_path": spec.get("prim_path", _default_prim_path(env_cfg.scene, name))}
@@ -580,7 +645,7 @@ def describe(cfg: dict[str, Any]) -> str:
         f"sim       : dt={sim.get('dt','-')} decimation={sim.get('decimation','-')} "
         f"episode_s={sim.get('episode_length_s','-')} "
         f"physics={sim.get('physics') or 'task default'}",
-        f"control   : source={ctl.get('source','-')} transport={ctl.get('transport','inprocess')} "
+        f"control   : source={ctl.get('source','-')} transport={ctl.get('transport','inprocess')}  actions={ctl.get('actions', 'joint')} "
         f"horizon={ctl.get('action_horizon',1)}",
         f"objective : {obj.get('sequence','-')}",
         f"spawn     : {obj.get('spawn','-')}",
