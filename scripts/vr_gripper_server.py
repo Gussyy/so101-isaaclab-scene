@@ -109,6 +109,14 @@ class VrDriver:
     # -- from the WebSocket thread ------------------------------------------------------------
     def push(self, msg: dict) -> None:
         pos, quat = webxr_to_sim(msg["pos"], msg.get("quat", (0.0, 0.0, 0.0, 1.0)))
+        # The raw numbers, for the first contact with real hardware: the first few messages and
+        # then one in every 300. This is the only place the "derived, not measured" facts about
+        # the page -- the frame, the button indices -- can be checked against a real controller.
+        if self.received < 5 or self.received % 300 == 0:
+            p = msg["pos"]
+            print(f"\n[vr] page msg {self.received}: webxr pos=({p[0]:+.3f},{p[1]:+.3f},{p[2]:+.3f})"
+                  f" -> sim ({pos[0]:+.3f},{pos[1]:+.3f},{pos[2]:+.3f})  squeeze={msg.get('squeeze', 0):.2f}"
+                  f" trigger={msg.get('trigger', 0):.2f} recentre={msg.get('recentre', False)}", flush=True)
         with self._lock:
             self._sample = {
                 "pos": pos, "quat": quat,

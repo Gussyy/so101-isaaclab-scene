@@ -20,6 +20,10 @@ writes the YAML and launches both of the above.
 | **TRIGGER** (hold) | close the jaw |
 | **A** | re-centre: the grasp point returns to `--home` |
 
+**With a Link cable, use the PC's browser instead:** `https://localhost:8443/` in Chrome or
+Edge, proceed past the certificate warning, Enter VR — the session goes to the headset through
+the Meta runtime. That is the route verified on hardware.
+
 The simulation stays on the monitor. In the headset you see passthrough (the room, and the
 monitor in it) if the browser grants `immersive-ar`, otherwise a dark void; the controller is
 the only thing the headset contributes. That was the choice made up front, and it is why this
@@ -98,13 +102,34 @@ Everything below the page is exercised without a headset, in two ways:
 | page served over HTTPS with the generated certificate | **verified**, `curl -k` |
 | `control.actions: ik` builds an 8-wide action on the grasp point | **verified**, tests |
 | fake controller → IK → arm follows the pose, grasps and lifts a block | **verified** — 4–20 mm tracking, block carried; measurements below |
-| **the page in the Quest's own browser: session, `gripSpace`, button indices** | **NOT verified** — no headset was attached while this was built |
+| the page with a real controller: session, `gripSpace`, frame mapping, button indices | **verified on a Quest 3 over Link, through desktop Chrome** — raw numbers below |
 
-That last row is the one to watch on first use. The button mapping follows the WebXR
-`xr-standard` profile — 0 trigger, 1 squeeze, 4 A/X — and the frame conversion follows the
-spec; both are the sort of "derived, not measured" fact this repo has been burned by before.
-The page prints the raw pose and both buttons on screen for exactly that reason: if the arm
-goes left when you go forward, the number to look at is right there.
+The button mapping follows the WebXR `xr-standard` profile — 0 trigger, 1 squeeze, 4 A/X —
+and the frame conversion follows the spec; both were "derived, not measured" until the first
+session with hardware, which the bridge logged (it prints the first messages and every 300th):
+
+```
+[vr] page connected from 192.168.1.103              <- Chrome on the PC, over Link
+[vr] page msg 300: webxr pos=(+0.269,+0.181,-0.394) -> sim (+0.394,-0.269,+0.181)  squeeze=0.00 trigger=0.00
+[vr] page msg 600: webxr pos=(+0.262,+0.497,-0.345) -> sim (+0.345,-0.262,+0.497)  squeeze=1.00 trigger=0.00
+  ENGAGED  pos=(+0.215, +0.001, +0.227)  jaw=open
+  held     pos=(+0.243, +0.146, +0.211)  jaw=open      <- released: the arm stays put
+[vr] page msg 900: webxr pos=(+0.316,+0.479,-0.404) -> sim (+0.404,-0.316,+0.479)  squeeze=1.00 trigger=1.00
+  ENGAGED  pos=(+0.414, +0.062, +0.186)  jaw=closed
+```
+
+Forward (−z) came out as +x, right (+x) as −y, up as +z; GRIP is button 1 and TRIGGER is
+button 0. The simulator stepped on those actions throughout (4,600 steps, no drop — including
+a 20-second bridge restart mid-session, which the page and the ZeroMQ client both rode out).
+
+**The route that worked was Link, not the Quest browser.** With the headset on a Link cable,
+`https://localhost:8443/` in Chrome or Edge on the PC hands the WebXR session to the Meta
+runtime, which renders it to the headset and reads the controllers. No LAN address, no Wi-Fi.
+The Quest-browser route over the LAN address remains the wireless option and is untested.
+
+**Scale.** The operator's hand travelled ~40 cm in that session; the arm reaches 30. Targets
+went to 0.41 m (beyond reach — the arm stalls at its extent) and to 0.05 m (inside the base).
+`--scale 0.6` on the bridge makes hand travel cover the workspace rather than overshoot it.
 
 ## Measured: does the arm follow?
 

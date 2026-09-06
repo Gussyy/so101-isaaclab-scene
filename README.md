@@ -513,10 +513,10 @@ joints chasing a 6-DoF pose park at a joint limit 150–220 mm off, and this arm
 cannot point its jaws down below 0.22 m anyway. [docs/VR.md](docs/VR.md) has every setting
 tried and the posture grid that proves the last point.
 
-**Verified without a headset:** the bridge's frame mapping, clutch and jaw; the page → WebSocket →
-bridge → ZeroMQ path (2,299 messages counted from a browser's mouse mode); HTTPS with the
-generated certificate; the IK wiring. **Not verified:** the page inside the Quest browser itself
-— no headset was attached while this was built. That one row is called out in the doc.
+**Verified on a Quest 3 over Link** (Chrome on the PC at `https://localhost:8443/`): the frame
+mapping — forward came out forward — GRIP as the clutch, TRIGGER as the jaw, and the simulator
+stepping on every action; the bridge logs the raw numbers so the next headset can be checked the
+same way. The wireless Quest-browser route is the one thing still untested.
 
 ### Set the scene up in a window first
 
