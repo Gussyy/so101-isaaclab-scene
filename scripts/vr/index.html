@@ -35,6 +35,19 @@
 //   down: text {type:"cams", names:[...]} once per camera set, then binary [index byte][JPEG]
 const status = document.getElementById('status'), views = document.getElementById('views');
 let ws = null, sent = 0, frames = 0, lastSend = 0, lastMsg = null, lines = [];
+let recording = false;                  // the bridge says; the main panel gets a red REC badge
+const badgeCanvas = document.createElement('canvas');
+function badge(bmp) {
+  badgeCanvas.width = bmp.width; badgeCanvas.height = bmp.height;
+  const c = badgeCanvas.getContext('2d');
+  c.drawImage(bmp, 0, 0);
+  const r = Math.max(8, bmp.height * 0.035);
+  c.fillStyle = 'rgba(0,0,0,0.45)'; c.fillRect(r, r, r * 9, r * 2.6);
+  c.fillStyle = '#e53935'; c.beginPath(); c.arc(r * 2.2, r * 2.3, r * 0.8, 0, Math.PI * 2); c.fill();
+  c.fillStyle = '#fff'; c.font = `bold ${Math.round(r * 1.6)}px sans-serif`; c.textBaseline = 'middle';
+  c.fillText('REC', r * 3.4, r * 2.3);
+  return badgeCanvas;
+}
 let cams = [];                     // camera names, in index order
 const latest = [];                 // per camera: {bitmap, dirty, canvas}
 const SEND_HZ = 60;
@@ -57,14 +70,19 @@ function connect() {
   ws.onerror = () => {};
   ws.onmessage = async (ev) => {
     if (typeof ev.data === 'string') {
-      try { const m = JSON.parse(ev.data); if (m.type === 'cams') setCams(m.names); } catch (e) {}
+      try {
+        const m = JSON.parse(ev.data);
+        if (m.type === 'cams') setCams(m.names);
+        else if (m.type === 'rec') { recording = !!m.on; render(); }
+      } catch (e) {}
       return;
     }
     if (!(ev.data instanceof Blob)) return;
     try {
       const idx = new Uint8Array(await ev.data.slice(0, 1).arrayBuffer())[0];
       if (!latest[idx]) return;
-      const bmp = await createImageBitmap(ev.data.slice(1));
+      let bmp = await createImageBitmap(ev.data.slice(1));
+      if (idx === 0 && recording) bmp = badge(bmp);       // the red REC dot on the main panel
       const slot = latest[idx];
       slot.bitmap = bmp; slot.dirty = true; frames++;
       slot.ctx.drawImage(bmp, 0, 0, slot.canvas.width, slot.canvas.height);
@@ -87,7 +105,7 @@ function log(s) { lines = [s, ...lines].slice(0, 4); render(); }
 const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
 function render() {
   const m = lastMsg ? `pos ${m3(lastMsg.pos)}  quat ${m3(lastMsg.quat)}  grip ${lastMsg.squeeze.toFixed(1)}  trig ${lastMsg.trigger.toFixed(1)}` : '';
-  status.textContent = `${lines.join('\n')}\nsent ${sent}   frames ${frames}\n${m}`;
+  status.textContent = `${recording ? '\u25cf REC   ' : ''}${lines.join('\n')}\nsent ${sent}   frames ${frames}\n${m}`;
 }
 connect();
 

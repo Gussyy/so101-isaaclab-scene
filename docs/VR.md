@@ -388,7 +388,9 @@ on the right. The gate is per frame now and both hands go out together.
 | either | TRIGGER | close that arm's jaw |
 
 The page sends buttons 4 and 5 of each controller as it always did; the bridge gives them
-their jobs per hand, and the drivers underneath still only know "home" and "reset". A
+their jobs per hand, and the drivers underneath still only know "home" and "reset". While an
+episode is recording the main panel in the headset carries a red **● REC** badge (the bridge
+tells the page on every change and on connect; the page composites it onto the frames). A
 recording request travels on the reply's `info` (`{"record": "start" | "stop"}`), once, and
 `run.py` does the recording — it is the process that has the joint state, the joint targets
 and the camera frames, and it writes with the same `LeRobotRecorder` that

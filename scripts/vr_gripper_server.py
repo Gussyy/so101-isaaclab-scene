@@ -558,6 +558,7 @@ class Bimanual:
         self.pages = right.pages                    # the page set the socket handler fills
         self._down = {"right": [False, False], "left": [False, False]}   # buttons 4 and 5, per hand
         self._record: str | None = None             # "start" / "stop", said once on the next reply
+        self.recording = False                      # what the page shows as the red REC badge
 
     @property
     def served(self) -> int:
@@ -585,9 +586,13 @@ class Bimanual:
         if hand == "right":
             if b5 and not was5:
                 self._record = "start"
+                self.recording = True
+                self.tell_pages()
                 print("[vr] B: recording an episode", flush=True)
             if b4 and not was4:
                 self._record = "stop"
+                self.recording = False
+                self.tell_pages()
                 print("[vr] A: episode ended", flush=True)
             m["recentre"] = m["reset"] = False
             self.right.push(m)
@@ -601,6 +606,17 @@ class Bimanual:
 
     def stream_forever(self, *a, **k) -> None:
         self.right.stream_forever(*a, **k)
+
+    def tell_pages(self, ws=None) -> None:
+        """The recording state, to one page (on connect) or every page (on change): the page
+        draws a red REC badge on the main panel while it is on -- the operator's only
+        indicator inside the headset."""
+        msg = json.dumps({"type": "rec", "on": self.recording})
+        for w in ([ws] if ws is not None else list(self.pages)):
+            try:
+                w.send(msg)
+            except Exception:  # noqa: BLE001  -- a page that went away
+                self.pages.discard(w)
 
     def __call__(self, obs: ObsPacket):
         if self.arms == 1 and obs.state and "ee_pose2" in obs.state:
@@ -645,6 +661,8 @@ def serve_page_and_socket(driver: VrDriver, host: str, port: int, tls: bool) -> 
         driver.pages.add(ws)
         if driver.cam_names:
             driver.announce_cams(ws)
+        if hasattr(driver, "tell_pages"):
+            driver.tell_pages(ws)
         try:
             for raw in ws:
                 if isinstance(raw, bytes):
@@ -869,12 +887,19 @@ def demo() -> None:
     bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": True})
     r4 = bi(two)
     assert isinstance(r4, ActionPacket) and r4.info.get("record") == "start" and r4.reset is None, r4
+    assert bi.recording, "the badge state follows B"
     assert not bi.right._reset_pending, "right B records; it does not reset"
     bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": True})
     assert not isinstance(bi(two), ActionPacket), "held B says it once"
     bi.push({"hand": "right", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "recentre": True})
     r5 = bi(two)
     assert isinstance(r5, ActionPacket) and r5.info.get("record") == "stop", r5
+    assert not bi.recording, "and A"
+    class _P:
+        def __init__(self): self.got = []
+        def send(self, m): self.got.append(m)
+    pg = _P(); bi.tell_pages(pg)
+    assert json.loads(pg.got[0]) == {"type": "rec", "on": False}, pg.got
     print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim, two arms, buttons, record")
 
 
