@@ -110,7 +110,7 @@ Unknown keys are rejected at parse time with the valid options listed, so a typo
 | kind | names |
 |---|---|
 | robots | `so101`, `so101_full` |
-| objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `cloth`, `soft_body`, `light` |
+| objects | `cuboid`, `static_cuboid`, `usd`, `ycb`, `lehome`, `physx_cloth`, `cloth`, `soft_body`, `light` |
 | cameras | `tiled` |
 | sources | `zero`, `random`, `rl_checkpoint`, `keyboard`, `keyframes`, `gripper_cycle`, `zmq` |
 
@@ -501,9 +501,10 @@ python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: 
 # move and turn (clutch), TRIGGER = close the jaw. Right B / A = record an episode / end it
 # (LeRobot layout, datasets/vr_<time>). Left X = reset the scene, left Y = both arms glide
 # back to their start pose. Both arms start in their folded rest pose. Tilt and roll follow your
-# wrist; the heading is always toward where the arm reaches (5 joints). The scene is a crate
-# between the arms, a mug in front of the right one and a soup can in front of the left. Each
-# gripper carries a 170-degree wrist camera; the right one is the big panel in the headset.
+# wrist; the heading is always toward where the arm reaches (5 joints). The scene is a T-shirt
+# (PhysX cloth) flat on the table between the arms, for folding; the crate, mug and soup can
+# are configs/vr_teleop_crate.yaml. Each gripper carries a 170-degree wrist camera; the right
+# one is the big panel in the headset.
 # Three of the simulator's cameras float in front of you; every session is logged to logs/vr/.
 ```
 

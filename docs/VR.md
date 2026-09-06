@@ -176,9 +176,10 @@ and reach **41 mm below** the finger line; the gear sits 16 mm below the line ju
 palm; the housing runs 62 mm *behind* the palm and 28 mm below the line. So an object under
 the grasp point is under the housing, and the housing lands on it — 115 mm for a 90 mm block,
 as measured, with the block at x 0.27, 0.30 and even 0.33, where its near top edge still caught
-the housing's far corner. The fingers are open at joint 0 and closed at −0.044: pads 134 mm
-apart open, 49 mm closed, level at `wrist_roll` 0 (±0.35 rad tilts them 20 mm apart in
-height; the body *origins* sit at different heights, which misled one attempt).
+the housing's far corner. The fingers are open at joint 0; the asset's authored stop was
+−0.044, pads 134 mm apart open and 49 mm closed, level at `wrist_roll` 0 (±0.35 rad tilts
+them 20 mm apart in height; the body *origins* sit at different heights, which misled one
+attempt). The stop is now −0.068 — see "The jaw closes" under the shirt scene.
 
 The scene follows from the numbers: the block centred at **x = 0.35**, under the pads (x
 0.27–0.37 when the grasp point is at 0.273) and 27 mm forward of the housing. With the finger
@@ -442,7 +443,7 @@ orientation anchor; B on either resets the scene. Only the parallel gripper with
 `control.actions: ik`; the task's reward, observations and resets still watch one robot and
 one object, so the second arm is scenery to the score and a robot to the operator.
 
-The shipped scene puts the arms 30 cm apart (y = ∓0.15, right and left as the operator sees
+The crate scene (`configs/vr_teleop_crate.yaml`) puts the arms 30 cm apart (y = ∓0.15, right and left as the operator sees
 them) with a crate between them — a 16 cm floor and four 6 cm walls, static boxes — and real
 things from Isaac Sim's YCB set 0.35 m in front of each arm, under the finger pads at the
 start pose: a **mug** (81 mm across, 120 g, handle turned away) for the right arm and a
@@ -455,11 +456,34 @@ the wall takes 7 cm, and the crate's near half is within both arms' reach.
 The goal-pose and grasp-frame markers (`/Visuals/Command/*` and the IK target frame) are off:
 `scene.debug_markers: false`. They are for a policy's author and float in the operator's view.
 
-**Cloth folding is not in this scene, on purpose.** LeHome's shirt runs here as Newton VBD
-cloth (`configs/lehome_bedroom_shirt.yaml`, docs/LEHOME.md), but a deformable scene with a
-camera renders at 1.9 steps/s (docs/PHYSICS.md) against the 50 the arm needs to move in real
-time, and a single one of these grippers could not lift the cloth in the measured attempts.
-It stays a separate config until the solver and the grasp are both there.
+## Clothes folding: the shirt, on PhysX
+
+The shipped scene (`configs/vr_teleop.yaml`) is the two arms and a T-shirt flat on the table
+between them, `shirt: {type: physx_cloth, usd_path: assets/garment/shirt.usd, scale: 0.18}`.
+LeHome's engine was the first thing tried, since that is where the shirt asset came from:
+LeHome runs its cloth as **PhysX particle cloth**, and that schema is gone from the PhysX in
+Isaac Sim 5+ (`isaaclab_physx` has no particle system at all; only the OmniPhysics deformable
+bodies). The Newton VBD path (`configs/lehome_bedroom_shirt.yaml`) stays a separate config:
+every camera render there does a full particle writeback and a device stall, 1.9–4.2 steps/s
+(docs/PHYSICS.md). So the shirt is a **PhysX surface deformable** — the same engine as the arms,
+the same contacts, and a camera costs what it costs on a rigid scene. It is GPU-only, so this
+config is the one VR scene on `sim.device: cuda:0`. The material is the set Isaac Lab's own PhysX
+cloth-lifting task ships (Young's modulus 1e6, 1 mm thick, 5 mm rest offset) except the
+friction, 1.0 instead of their 10 (the mock below says why); solver stiffnesses, not an
+identified fabric. The task's terms still need a rigid `object`, so a 2 cm cube sits
+parked behind the left arm, out of every camera.
+
+**The jaw closes.** The asset was authored with the finger stop at −0.044, which leaves the
+pads 49 mm apart when closed: fine for a mug, and no use on cloth — a layer of cloth is two
+rest offsets thick to a rigid pad (10 mm here), so with a 49 mm gap a single layer can never
+be pinched whatever the material. The prismatic stop in `physics.usda` is now −0.068 (each
+pad moves 0.97 mm per mm of travel), and `tuning.py`'s travel and close command follow.
+Measured after the change: the close command drives the fingers to −0.062, where the pads meet and stop (the −0.068 stop itself is never reached); open is unchanged at 134 mm. ASSUMED, not measured on the real arm, that its
+jaw closes fully; if it stops short, put the real gap's travel back in both places.
+
+**Measured, headless, four cameras at 20 fps:** **15.6 steps/s** with the shirt and four cameras at 20 fps (400 steps); 19.2 with the cameras off, 19.1 with the shirt removed instead, 15.3 with the 9 mm shirt mesh, 15.8 with the cameras at 10 fps. The floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (4 steps/s) or the cameras (4 steps/s). That is 0.3× real time: the arms follow the operator at a third of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
+
+**The mock on the shirt, fake controller on the right arm:** the fake controller's 12-second script (reach out from the rest pose, tilt, descend, close, lift, carry 150 mm left, release, rise) with the shirt placed under its grasp (world y −0.15, `pcloth.yaml`): the jaw closes at 37 mm on the shirt's collar bulk, the shirt's highest node goes from 51 mm at rest to **175 mm** in the carry, and drops back to 55 mm when the jaw opens — **CARRIED**. With the reference friction of 10 the shirt stayed hung over the pads after release (top at 185 mm); friction 1.0 holds and lets go, and is what ships. Tracking over the 940 steps after the first request **8.6 mm mean**; two transient dips of ~40 mm (15°) during the fast reach and the descent. The same script shows them with no shirt in the scene at all, on GPU and on CPU physics alike: with nothing under the pads the descent runs `wrist_flex` to its −1.66 stop and the pads onto the table, and the solver trades 15° of pitch for it. A transient of the script, not the cloth or the device; the crate mock (6.6 mm mean) had the mug under the pads.
 
 **The two-arm mock, fake controller on the right arm, the left arm holding:** the right arm reaches out from its rest pose, tilts, closes on the mug at 71 mm, lifts it to 123 mm, carries it 150 mm to the crate and releases it inside (the mug settles at 83 mm, leaning on a wall). Tracking error over the 940 steps after the first request **6.6 mm mean**, orientation **4.4° mean**; the left arm holds its rest pose to the millimetre throughout — **CARRIED**.
 

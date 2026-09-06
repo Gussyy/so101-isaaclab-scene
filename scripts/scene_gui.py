@@ -56,6 +56,10 @@ ROBOT_JOINTS = {
 PHYSICS = ["physx", "newton_mjwarp", "newton_vbd"]
 # Object types that take a `name:` from a catalogue, and their default names.
 NAMED = {"ycb": "gelatin_box", "lehome": "burger_patty"}
+# The one that takes a `usd_path:` instead (the name column holds it): the shirt, at the scale
+# and spot the folding task uses. A PhysX deformable is GPU only (builtins.py), so picking it
+# writes `sim.device: cuda:0` whatever the physics dropdown says.
+PHYSX_CLOTH = {"usd_path": "assets/garment/shirt.usd", "scale": 0.18, "pos": [0.30, -0.05, 0.02]}
 VR_CAMS = {
     # The right wrist camera leads; both wrist cameras ride the grippers (docs/VR.md).
     "a_wrist_right": {"type": "tiled", "attach": "gripper_base", "robot": "robot", "prim_path": "{ENV_REGEX_NS}/WristCamRight",
@@ -70,19 +74,19 @@ VR_CAMS = {
 
 
 class ObjectRow:
-    """One line of the objects table: key, type, catalogue name, x y z, static."""
+    """One line of the objects table: key, type, catalogue name or usd path, x y z, static."""
 
     def __init__(self, parent, on_remove, spec: dict | None = None, key: str = "object"):
         self.frame = ttk.Frame(parent)
         spec = spec or {}
         self.key = tk.StringVar(value=key)
         self.type = tk.StringVar(value=spec.get("type", "cuboid"))
-        self.name = tk.StringVar(value=spec.get("name", ""))
+        self.name = tk.StringVar(value=spec.get("name", spec.get("usd_path", "")))
         pos = spec.get("pos", [0.22, 0.0, 0.015])
         self.x, self.y, self.z = (tk.StringVar(value=f"{v:g}") for v in pos)
         self.static = tk.BooleanVar(value=bool(spec.get("static", False)))
         self._extra = {k: v for k, v in spec.items()
-                       if k not in {"type", "name", "pos", "static"}}   # size, color, scale, ... kept as-is
+                       if k not in {"type", "name", "usd_path", "pos", "static"}}   # size, color, scale, ... kept as-is
 
         ttk.Entry(self.frame, textvariable=self.key, width=10).grid(row=0, column=0, padx=2)
         ttk.OptionMenu(self.frame, self.type, self.type.get(), *sorted(OBJECTS),
@@ -97,15 +101,22 @@ class ObjectRow:
 
     def _on_type(self) -> None:
         t = self.type.get()
-        self.name_entry.configure(state="normal" if t in NAMED else "disabled")
+        self.name_entry.configure(state="normal" if t in NAMED or t == "physx_cloth" else "disabled")
         if t in NAMED and not self.name.get():
             self.name.set(NAMED[t])
+        if t == "physx_cloth" and not self.name.get():   # a fresh pick, not a loaded row: the shirt, where the task puts it
+            self.name.set(PHYSX_CLOTH["usd_path"])
+            for var, v in zip((self.x, self.y, self.z), PHYSX_CLOTH["pos"]):
+                var.set(f"{v:g}")
 
     def to_spec(self) -> tuple[str, dict]:
         spec = dict(self._extra)
         spec["type"] = self.type.get()
         if self.type.get() in NAMED:
             spec["name"] = self.name.get()
+        elif self.type.get() == "physx_cloth":
+            spec["usd_path"] = self.name.get()
+            spec.setdefault("scale", PHYSX_CLOTH["scale"])
         spec["pos"] = [float(self.x.get()), float(self.y.get()), float(self.z.get())]
         if self.static.get():
             spec["static"] = True
@@ -138,7 +149,7 @@ class SceneGui:
         ttk.Entry(f, textvariable=self.episode, width=6).grid(row=1, column=3, sticky="w", **pad)
 
         # -- objects -----------------------------------------------------------------
-        ttk.Label(f, text="Objects   (key, type, catalogue name, x, y, z)").grid(row=2, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Label(f, text="Objects   (key, type, catalogue name / usd path, x, y, z)").grid(row=2, column=0, columnspan=4, sticky="w", **pad)
         self.objects = ttk.Frame(f)
         self.objects.grid(row=3, column=0, columnspan=4, sticky="w")
         ttk.Button(f, text="+ object", command=self.add_row).grid(row=4, column=0, sticky="w", **pad)
@@ -195,6 +206,7 @@ class SceneGui:
             if k in objects:
                 raise ValueError(f"two objects named {k!r}")
             objects[k] = spec
+        cloth = any(s["type"] == "physx_cloth" for s in objects.values())
         cfg = {
             "meta": {"name": "gui-scene", "notes": "written by scripts/scene_gui.py"},
             "task": "pick_place",
@@ -211,9 +223,10 @@ class SceneGui:
                    if self.arm2.get() and robot == "so101_full" and self.ik.get() else {}),
                 "objects": objects,
             },
-            # One env on PhysX steps 4x faster on the CPU (docs/VR.md); Newton needs cuda.
+            # One env on PhysX steps 4x faster on the CPU (docs/VR.md); Newton needs cuda, and so
+            # does a PhysX deformable (builtins.py: physx_cloth).
             "sim": {"episode_length_s": float(self.episode.get()), "physics": self.physics.get(),
-                    "device": "cpu" if self.physics.get() == "physx" else "cuda:0"},
+                    "device": "cpu" if self.physics.get() == "physx" and not cloth else "cuda:0"},
             "control": {"source": self.source.get(), "action_horizon": 1},
         }
         if self.camera.get():
@@ -289,11 +302,11 @@ def demo() -> None:
     """Self-check, headless: the form round-trips a config and refuses a duplicate object key."""
     root = tk.Tk()
     root.withdraw()
-    gui = SceneGui(root, REPO / "configs" / "vr_teleop.yaml")
+    gui = SceneGui(root, REPO / "configs" / "vr_teleop_crate.yaml")
     cfg = gui.to_config()
     assert cfg["scene"]["robot"]["type"] == "so101_full" and cfg["scene"]["robot"]["rot"] == ROBOT_ROT["so101_full"]
     assert cfg["control"]["actions"] == "ik" and cfg["control"]["source"] == "zmq"
-    src = yaml.safe_load((REPO / "configs" / "vr_teleop.yaml").read_text(encoding="utf-8"))
+    src = yaml.safe_load((REPO / "configs" / "vr_teleop_crate.yaml").read_text(encoding="utf-8"))
     assert set(cfg["scene"]["objects"]) == set(src["scene"]["objects"]), cfg["scene"]["objects"]
     assert cfg["scene"]["objects"]["crate_floor"]["type"] == "static_cuboid"   # static-ness is the type here
     assert cfg["scene"]["objects"]["object"]["name"] == src["scene"]["objects"]["object"]["name"], "extra keys must survive"
@@ -304,6 +317,16 @@ def demo() -> None:
     tmp = REPO / "configs" / "gui_scene.yaml"
     gui.write(tmp)
     load_config(tmp)
+    gui.add_row(key="shirt")
+    gui.rows[-1].type.set("physx_cloth"); gui.rows[-1]._on_type()   # what picking it in the dropdown does
+    shirt = {"type": "physx_cloth", "usd_path": "assets/garment/shirt.usd", "scale": 0.18, "pos": [0.30, -0.05, 0.02]}
+    cfg = gui.to_config()
+    assert cfg["scene"]["objects"]["shirt"] == shirt and cfg["sim"]["device"] == "cuda:0", "a PhysX deformable is GPU only"
+    ship = SceneGui(root, REPO / "configs" / "vr_teleop.yaml").to_config()   # the shipped shirt scene round-trips
+    assert ship["scene"]["objects"]["shirt"]["type"] == "physx_cloth" and ship["sim"]["device"] == "cuda:0"
+    assert ship["scene"]["objects"]["shirt"]["static_friction"] == 1.0, "extra keys must survive"
+    gui.add_row(shirt, "shirt2")
+    assert gui.rows[-1].to_spec() == ("shirt2", shirt), "a loaded cloth block round-trips"
     gui.rows[1].key.set("object")
     try:
         gui.to_config()
@@ -312,7 +335,7 @@ def demo() -> None:
     else:
         raise AssertionError("duplicate key accepted")
     root.destroy()
-    print("scene_gui demo OK: round-trip, builder accepts it, duplicate key refused")
+    print("scene_gui demo OK: round-trip, builder accepts it, physx_cloth goes to the GPU, duplicate key refused")
 
 
 if __name__ == "__main__":

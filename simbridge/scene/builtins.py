@@ -402,6 +402,73 @@ def _lehome(spec: dict[str, Any]) -> Any:
 # against a real fabric. See docs/PHYSICS.md.
 
 
+@register_object("physx_cloth")
+def _physx_cloth(spec: dict[str, Any]) -> Any:
+    """A garment as a PhysX surface deformable -- cloth on the same engine as the arms.
+
+    ``{type: physx_cloth, usd_path: assets/garment/shirt.usd, scale: 0.18}``. PhysX 5's surface
+    deformable (the OmniPhysics schema; Isaac Sim 5+ dropped the particle cloth LeHome used) --
+    so the arms, the contacts and the renderer stay on PhysX and a camera costs what it costs
+    on a rigid scene, not the Newton render stall (docs/PHYSICS.md). GPU physics only:
+    ``sim.device: cuda:0``. Material numbers are solver stiffnesses, not an identified fabric.
+    """
+    from isaaclab.assets.deformable_object import DeformableObjectCfg
+    from isaaclab_physx.sim.schemas import PhysxCollisionCfg, PhysxDeformableBodyPropertiesCfg
+    from isaaclab_physx.sim.spawners.materials import PhysxSurfaceDeformableBodyMaterialCfg
+
+    if "usd_path" not in spec:
+        raise KeyError("a physx_cloth needs a usd_path (a single Mesh, e.g. assets/garment/shirt.usd)")
+    raw = spec.get("scale", 1.0)
+    scale = (float(raw),) * 3 if isinstance(raw, (int, float)) else tuple(float(v) for v in raw)
+    # The numbers Isaac Lab's own PhysX cloth-lifting task ships (isaaclab_tasks core/lift
+    # franka_soft/franka_cloth_env_cfg.py), except friction: their 10 kept the shirt hung
+    # over the pads after the jaw opened; 1.0 holds and lets go (docs/VR.md). Solver
+    # stiffnesses, not an identified fabric.
+    material = PhysxSurfaceDeformableBodyMaterialCfg(
+        density=float(spec.get("density", 1000.0)),
+        surface_thickness=float(spec.get("thickness", 0.001)),
+        poissons_ratio=float(spec.get("poissons_ratio", 0.25)),
+        youngs_modulus=float(spec.get("youngs_modulus", 1.0e6)),
+        surface_bend_stiffness=float(spec.get("bend_stiffness", 1.0e6)),
+        elasticity_damping=float(spec.get("elasticity_damping", 0.1)),
+        bend_damping=float(spec.get("bend_damping", 0.1)),
+        static_friction=float(spec.get("static_friction", 1.0)),
+        dynamic_friction=float(spec.get("dynamic_friction", 1.0)),
+    )
+    # A cloth layer is 2 x rest_offset thick to a rigid pad: 5 mm makes one layer a 10 mm
+    # thing the fingers can pinch. On the USD path Isaac Lab applies collision_props BEFORE
+    # the deformable exists, so they land on the root Xform and the real collider (sim_mesh)
+    # never sees them -- apply them after the spawn instead, as the mesh spawner does.
+    collision = [PhysxCollisionCfg(rest_offset=float(spec.get("rest_offset", 0.005)),
+                                   contact_offset=float(spec.get("contact_offset", 0.012)))]
+
+    def spawn(prim_path: str, cfg, translation=None, orientation=None, **kwargs):
+        from isaaclab.sim import schemas
+        from isaaclab.sim.spawners.from_files import spawn_from_usd
+        prim = spawn_from_usd(prim_path, cfg, translation, orientation)
+        schemas.apply_collision_properties(prim_path, collision)
+        return prim
+
+    return DeformableObjectCfg(
+        prim_path=spec.get("prim_path", "{ENV_REGEX_NS}/Cloth"),
+        init_state=DeformableObjectCfg.InitialStateCfg(
+            pos=_pos(spec, default=(0.27, 0.0, 0.02)),
+            rot=tuple(spec.get("rot", (0.0, 0.0, 0.0, 1.0))),
+        ),
+        spawn=sim_utils.UsdFileCfg(
+            func=spawn,
+            usd_path=spec["usd_path"],
+            scale=scale,
+            # Self-collision so a fold is two layers, not one passing through the other.
+            deformable_props=PhysxDeformableBodyPropertiesCfg(
+                self_collision=bool(spec.get("self_collision", True)),
+                self_collision_filter_distance=2.5 * collision[0].rest_offset),
+            collision_props=None,
+            physics_material=material,
+        ),
+    )
+
+
 @register_object("cloth")
 def _cloth(spec: dict[str, Any]) -> Any:
     """A rectangular sheet of cloth. Needs ``sim.physics: newton_vbd``.

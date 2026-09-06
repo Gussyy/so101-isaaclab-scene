@@ -267,7 +267,7 @@ over "tn__SOARM101FULL_yH9"
             point3f physics:localPos1 = (0, 0, 0)
             quatf physics:localRot0 = (0.5, -0.5, -0.5, 0.5)
             quatf physics:localRot1 = (1, 0, 0, 0)
-            float physics:lowerLimit = -0.044
+            float physics:lowerLimit = -0.068
             float physics:upperLimit = 0
             custom float urdf:limit:effort = 1000000
             custom float urdf:limit:velocity = 1000000
@@ -288,7 +288,7 @@ over "tn__SOARM101FULL_yH9"
             point3f physics:localPos1 = (0, 0, 0)
             quatf physics:localRot0 = (0.5, 0.5, 0.5, 0.5)
             quatf physics:localRot1 = (1, 0, 0, 0)
-            float physics:lowerLimit = -0.044
+            float physics:lowerLimit = -0.068
             float physics:upperLimit = 0
             custom float urdf:limit:effort = 1000000
             custom float urdf:limit:velocity = 1000000

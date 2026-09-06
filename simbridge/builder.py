@@ -95,6 +95,9 @@ def check_deformables(cfg: dict[str, Any]) -> None:
     than "my backend cannot simulate cloth", so it is worth an error at parse time.
     """
     objects = (cfg.get("scene") or {}).get("objects") or {}
+    physx_cloth = sorted(n for n, sp in objects.items() if isinstance(sp, dict) and sp.get("type") == "physx_cloth")
+    if physx_cloth and str((cfg.get("sim") or {}).get("device", "")).startswith("cpu"):
+        raise ValueError(f"physx_cloth object(s) {', '.join(physx_cloth)} need GPU physics; set 'sim.device: cuda:0' (PhysX deformables are GPU-only)")
     found = {n: sp.get("type") for n, sp in objects.items()
              if isinstance(sp, dict) and sp.get("type") in _DEFORMABLE_TYPES}
     if not found:

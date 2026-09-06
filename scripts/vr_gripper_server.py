@@ -494,9 +494,11 @@ class FakeController:
         while self.driver.served == 0:
             self.driver.push(self.sample(0.0))
             time.sleep(self.dt)
-        self.t0 = time.time()
+        # The script's clock is the simulator's: one script second per 50 replies, so the same
+        # motion happens at the same sim steps whether the simulator runs at 55 steps/s or 8.
+        served0 = self.driver.served
         while True:
-            self.driver.push(self.sample(time.time() - self.t0))
+            self.driver.push(self.sample((self.driver.served - served0) / 50.0))
             time.sleep(self.dt)
 
 

@@ -89,28 +89,49 @@ scene:
       stiffness: 200.0
       damping: 5.0
   objects:
-    # Clothes folding: a T-shirt as PhysX cloth (a surface deformable -- the particle cloth
-    # LeHome used is gone from this PhysX; docs/VR.md) between the arms, flat on the table.
-    # `object` is the rigid thing the task's terms watch; nothing here is scored, so it is a
-    # 2 cm cube parked behind the left arm, out of every camera. The crate scene is
-    # configs/vr_teleop_crate.yaml.
+    # Real things, from Isaac Sim's YCB set (streamed once, then cached). Each sits 0.35 m in
+    # front of its arm, under the finger pads at the start pose (docs/VR.md), and the crate
+    # sits between the arms. The parallel fingers open to 134 mm and now close fully, so the mug
+    # (81 mm across) and the soup can (68 mm) are both a pinch across the body; masses are
+    # the real ones, near enough. `object` is the one the task's terms watch.
     object:
-      type: cuboid
-      size: [0.02, 0.02, 0.02]
-      mass: 0.01
-      pos: [-0.25, 0.45, 0.01]
-      color: [0.3, 0.3, 0.3]
-    # 207 x 132 mm at this scale, turned so its length runs between the arms: centred 0.25 m
-    # out, where both arms' table-height reach (0.26-0.31 m from their own base) crosses it.
-    shirt:
-      type: physx_cloth
-      usd_path: assets/garment/shirt.usd
-      scale: 0.18
-      pos: [0.25, 0.0, 0.02]
-      rot: [0.0, 0.0, 0.7071068, 0.7071068]
-      # Cotton on rubber, roughly. The reference's 10 kept the shirt hung over the pads after release.
-      static_friction: 1.0
-      dynamic_friction: 1.0
+      type: ycb
+      name: mug
+      pos: [0.35, -0.15, 0.05]
+      rot: [0.0, 0.0, 0.7071068, 0.7071068]   # handle away from the fingers
+      mass: 0.12
+    soup_can:
+      type: ycb
+      name: tomato_soup_can
+      pos: [0.35, 0.15, 0.06]
+      mass: 0.20
+    # The crate: a 16 cm square floor with four 6 cm walls, 1 cm thick, from static boxes.
+    # Lift an object above 0.07 m to clear the wall; the pick-and-place ends inside it.
+    crate_floor:
+      type: static_cuboid
+      size: [0.16, 0.16, 0.01]
+      pos: [0.27, 0.0, 0.005]
+      color: [0.55, 0.42, 0.28]
+    crate_wall_near:
+      type: static_cuboid
+      size: [0.01, 0.16, 0.06]
+      pos: [0.195, 0.0, 0.03]
+      color: [0.55, 0.42, 0.28]
+    crate_wall_far:
+      type: static_cuboid
+      size: [0.01, 0.16, 0.06]
+      pos: [0.345, 0.0, 0.03]
+      color: [0.55, 0.42, 0.28]
+    crate_wall_left:
+      type: static_cuboid
+      size: [0.16, 0.01, 0.06]
+      pos: [0.27, 0.075, 0.03]
+      color: [0.55, 0.42, 0.28]
+    crate_wall_right:
+      type: static_cuboid
+      size: [0.16, 0.01, 0.06]
+      pos: [0.27, -0.075, 0.03]
+      color: [0.55, 0.42, 0.28]
 
   cameras:
     # What the operator sees in the headset. The right arm's wrist camera is the big panel in
@@ -160,10 +181,11 @@ scene:
 
 sim:
   episode_length_s: 600.0   # teleop: nothing here is scored, so do not reset under the operator
-  # PhysX on the GPU: the cloth is a deformable and those are GPU-only. The rigid scenes run
-  # PhysX on the CPU (0.6 ms a substep against 5.3; configs/vr_teleop_crate.yaml).
-  # MEASURED, this scene, headless, four cameras at 20 fps (docs/VR.md): **15.6 steps/s** with the shirt and four cameras at 20 fps (400 steps); 19.2 with the cameras off, 19.1 with the shirt removed instead, 15.3 with the 9 mm shirt mesh, 15.8 with the cameras at 10 fps. The floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (4 steps/s) or the cameras (4 steps/s). That is 0.3× real time: the arms follow the operator at a third of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
-  device: cuda:0
+  # One environment: PhysX on the CPU, not the GPU. MEASURED (docs/VR.md): a physics substep
+  # is 0.6 ms on the CPU and 5.3 ms on the GPU, where one arm is all launch overhead, and the
+  # IK's apply_action goes 3.9 -> 1.4 ms with it. The env step falls from 31 ms to 8 ms.
+  # Rendering stays on the GPU regardless. Newton backends need cuda; this is PhysX.
+  device: cpu
 
 control:
   source: zmq               # the VR bridge answers on this socket

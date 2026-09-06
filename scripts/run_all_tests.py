@@ -186,7 +186,7 @@ def test_gripper_config() -> None:
         half = build_env_cfg(cfg, device="cuda:0", num_envs=1).actions.gripper_action
         print("CONFIGURED" if set(half.close_command_expr.values()) == {-0.022} else "NOT CONFIGURED")
 
-        cfg["scene"]["robot"]["gripper"]["close"] = -0.06
+        cfg["scene"]["robot"]["gripper"]["close"] = -0.09   # beyond the -0.068 stop
         try:
             build_env_cfg(cfg, device="cuda:0", num_envs=1)
         except ValueError:
@@ -449,6 +449,22 @@ def test_vr_teleop() -> None:
             print('CMDCHECKED')
         else:
             print('BAD WEIGHT ACCEPTED')
+
+        # The folding scene: the same two arms, plus the shirt as a PhysX surface deformable.
+        cfg = load_config('configs/vr_teleop.yaml')
+        cfg['scene']['objects']['shirt'] = {'type': 'physx_cloth', 'usd_path': 'assets/garment/shirt.usd', 'scale': 0.18, 'pos': [0.30, -0.05, 0.02]}
+        cfg['sim']['device'] = 'cuda:0'
+        shirt = build_env_cfg(cfg, device='cuda:0', num_envs=1).scene.shirt
+        ok = (type(shirt).__name__ == 'DeformableObjectCfg' and shirt.spawn.deformable_props is not None
+              and type(shirt.spawn.physics_material).__name__ == 'PhysxSurfaceDeformableBodyMaterialCfg'
+              and tuple(shirt.init_state.pos) == (0.30, -0.05, 0.02))
+        print('PHYSXCLOTH' if ok else f'PHYSX CLOTH WRONG {type(shirt).__name__} {type(shirt.spawn).__name__} {shirt.init_state.pos}')
+        from simbridge.builder import check_deformables
+        cfg['sim']['device'] = 'cpu'
+        try:
+            check_deformables(cfg); print('CPU CLOTH ACCEPTED')
+        except ValueError as e:
+            print('PHYSXCLOTHCPU' if 'cuda' in str(e) else f'WRONG ERROR {e}')
         """
     )
     code, out = sh([PY, "-c", src_code], timeout=300)
@@ -465,6 +481,8 @@ def test_vr_teleop() -> None:
     record("a camera with attach: gripper_base rides each arm's gripper, fisheye", "WRISTCAM" in lines, last)
     record("scene.debug_markers: false turns the goal and grasp markers off", "NOMARKERS" in lines, last)
     record("a second arm without IK actions is refused", "ARM2NEEDSIK" in lines, last)
+    record("a physx_cloth object builds as a PhysX surface deformable", "PHYSXCLOTH" in lines, last)
+    record("a physx_cloth object on CPU physics is refused at parse time", "PHYSXCLOTHCPU" in lines, last)
 
     # The page the Quest opens: exists, and speaks the one message shape the bridge parses.
     page = (REPO / "scripts/vr/index.html").read_text(encoding="utf-8")

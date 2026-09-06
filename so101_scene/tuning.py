@@ -142,7 +142,8 @@ def so101_cfg(
 #                gripper_base, gripper_gear, arm_r, arm_l, gripper_frame_link
 #
 #   finger separation, body origins:   q =  0.000 -> 128.6 mm   (open)
-#                                      q = -0.044 ->  56.2 mm   (closed)
+#                                      q = -0.044 ->  56.2 mm   (the authored limit)
+#                                      q = -0.068 ->   pads meet (docs/VR.md, "the jaw closes")
 #
 # The two fingers are prismatic and move together. Contrast the single-jaw SO-101, whose jaw
 # bodies sat 36.2 mm apart at BOTH extremes -- that arm's grasp width was never measurable this
@@ -176,12 +177,16 @@ SO101_FULL_ARM_JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_f
 SO101_FULL_CLOTH_BODIES = ("gripper_base", "arm_l", "arm_r")
 
 SO101_FULL_FINGERS = ["base_gripper_left_joint", "base_gripper_right_joint"]
-# q = 0 is open, q = -0.044 is closed. Verified by measuring the separation at both extremes,
-# because the sign is not guessable from the URDF.
-# Measured travel of each prismatic finger, from the spawned articulation.
-SO101_FULL_TRAVEL = (-0.044, 0.0)
+# q = 0 is open, negative closes; the sign was verified by measuring the separation at both
+# extremes, because it is not guessable from the URDF. The asset was authored with a -0.044
+# stop, which leaves the pads 49 mm apart -- a parallel gripper that cannot pinch anything
+# thinner than a mug, and no use on cloth. The stop is now -0.068 in physics.usda (the pads
+# move 0.97 mm per mm of travel each), where the pads meet with a few millimetres to spare.
+# ASSUMED, not measured on the real arm: that its jaw closes fully; if it stops short, put
+# the real gap's travel back here and in physics.usda.
+SO101_FULL_TRAVEL = (-0.068, 0.0)
 SO101_FULL_OPEN = {j: 0.0 for j in SO101_FULL_FINGERS}
-SO101_FULL_CLOSE = {j: -0.044 for j in SO101_FULL_FINGERS}
+SO101_FULL_CLOSE = {j: -0.068 for j in SO101_FULL_FINGERS}
 
 
 def so101_full_cfg(
