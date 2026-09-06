@@ -180,15 +180,28 @@ the housing's far corner. The fingers are open at joint 0 and closed at −0.044
 apart open, 49 mm closed, level at `wrist_roll` 0 (±0.35 rad tilts them 20 mm apart in
 height; the body *origins* sit at different heights, which misled one attempt).
 
-The shipped scene follows from the numbers: grasp point (0.273, 0, 0.130) at the start
-(shoulder −0.3, elbow 1.0, wrist −0.6, finger tips 9° up), the block centred at **x = 0.35**,
-under the pads (x 0.27–0.37) and 27 mm forward of the housing (which ends at 0.288). From
-there the descent is the arm's own floor — the same tilt is reachable down to (0.269, 0.036)
-in the grid and was measured to 68 mm with the scene empty — which puts the pads 60 mm down
-the block's sides. The bridge's default `--home` is the start point, so the first grip does
-not jump, and B (reset) returns the arm there.
+The scene follows from the numbers: the block centred at **x = 0.35**, under the pads (x
+0.27–0.37 when the grasp point is at 0.273) and 27 mm forward of the housing. With the finger
+tips 9° up the descent is the arm's own floor — the same tilt is reachable down to
+(0.269, 0.036) in the grid and was measured to 68 mm with the scene empty — which puts the
+pads 60 mm down the block's sides.
 
-**The final mock run, fake controller:** reach down to 68 mm (1.7 mm off), close at 69 mm, lift the block to 121 mm, carry it 100 mm left at 121 mm and lower it onto the tray. Tracking error over the 840 steps after the first request **2.2 mm mean, 3.1 mm max**; orientation error **1.2° mean, 2.9° max**; object peak height 121 mm from a 45 mm rest — **CARRIED**.
+**The start pose is the real arm's rest pose.** Upper arm leaning back, forearm folded down
+over it, the gripper resting in front of the base with the fingers pointing down, 20° forward
+of vertical — the pose the arm is parked in on the desk. From a 57-posture grid of the folded
+region: shoulder −1.65, elbow 1.65, wrist 1.3 (just inside the ±1.745 / 1.69 limits), grasp
+point (0.112, 0, 0.091), finger tips at (0.144, 0.002), the housing on the table. The bridge
+takes **home** from the first pose the simulator reports, so `--home` is no longer needed and
+the first grip does not jump. B resets the scene, which puts the arm back there. **A glides
+the arm back there** — position at 0.10 m/s, the way the fingers point at 1 rad/s, about
+three seconds from the far side of the table — while the controller's current position is
+mapped to home, so motion resumes from the start pose without a jump. To pick from the table
+the operator tilts the wrist back so the finger tips point slightly up: that is the tilt that
+reaches 68 mm at x = 0.27, and the fake controller does the same (80° about the WebXR x axis).
+
+**The final mock run, fake controller, from the rest pose:** reach out and up from the folded pose while tilting the wrist back 80°, descend, close at 29 mm, lift the block to 183 mm, carry it 100 mm left and lower it onto the tray. Tracking error over the 940 steps after the first request **15 mm mean, 57 mm max** (the max while the arm unfolds and where the 80° tilt is not quite reachable at the table, so the solver trades 4 cm of height for it); orientation error **6° mean, 29° max**; object peak height 183 mm from a 45 mm rest — **CARRIED**.
+
+**The previous mock run, from a start pose over the block:** reach down to 68 mm (1.7 mm off), close at 69 mm, lift the block to 121 mm, carry it 100 mm left at 121 mm and lower it onto the tray. Tracking error over the 840 steps after the first request **2.2 mm mean, 3.1 mm max**; orientation error **1.2° mean, 2.9° max**; object peak height 121 mm from a 45 mm rest — **CARRIED**.
 
 **The finger colliders were convex hulls, and that is what every block was hitting.** With the
 housing and gear cleared, the block at x = 0.35 was still met at 107 mm — and the finger

@@ -497,8 +497,9 @@ python scripts/run_all_tests.py --sim    # plus scene load, cameras, ZMQ-driven 
 python scripts/vr_gripper_server.py --no-tls                          # terminal 1: the bridge
 python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: the sim, 55-60 steps/s (add --viz kit for a window; it halves that)
 # headset on Link: open http://localhost:8443/ in Chrome on this PC, Enter VR.
-# GRIP = move and turn the arm (clutch), TRIGGER = close the jaw, A = re-centre, B = reset.
-# Tilt and roll follow your wrist; the heading is always toward where the arm reaches (5 joints).
+# GRIP = move and turn the arm (clutch), TRIGGER = close the jaw, A = glide back to the start
+# pose over ~3 s, B = reset the scene. The arm starts in its folded rest pose. Tilt and roll
+# follow your wrist; the heading is always toward where the arm reaches (5 joints).
 # Three of the simulator's cameras float in front of you; every session is logged to logs/vr/.
 ```
 

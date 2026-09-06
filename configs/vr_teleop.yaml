@@ -47,19 +47,19 @@ scene:
   robot:
     type: so101_full        # the parallel gripper; IK is wired for this robot only
     rot: [0.0, 0.0, 0.0, 1.0]
-    # Start ABOVE the block, fingers 9 degrees up, their free ends over it: the task's rest pose
-    # put gripper_base at z = 0.06 inside the object. From the posture grid in docs/VR.md the
-    # grasp point starts at (0.273, 0.000, 0.130) and the same tilt is reachable down to
-    # (0.269, 0.036): a straight descent at a near-constant orientation, measured to a 68 mm
-    # floor with nothing in the way. MEASURED gripper geometry (docs/VR.md): the grasp point is
-    # the palm face; the pads run 95 mm forward of it and reach 41 mm below the finger line;
-    # the gear sits 16 mm below the line just ahead of the palm, the motor housing 28 mm below
-    # it and 62 mm behind. So the block goes under the pads, well forward of the palm.
+    # The folded rest pose of the real arm: upper arm leaning back, forearm folded down over
+    # it, gripper resting in front of the base with the fingers pointing down, 20 degrees
+    # forward of vertical. From the posture grid in docs/VR.md: grasp point (0.112, 0, 0.091),
+    # finger tips at (0.144, 0.002), the housing on the table. The joints sit just inside
+    # their limits (-1.745, 1.690). This is where the arm starts, where B (reset) puts it,
+    # and where A glides it back to; the bridge reads the point from the simulator, so
+    # `--home` is not needed. To pick from the table the operator tilts the wrist back so the
+    # finger tips point slightly up -- the tilt that reaches 68 mm at x = 0.27 (docs/VR.md).
     joint_pos:
       shoulder_pan: 0.0
-      shoulder_lift: -0.3
-      elbow_flex: 1.0
-      wrist_flex: -0.6
+      shoulder_lift: -1.65
+      elbow_flex: 1.65
+      wrist_flex: 1.3
       wrist_roll: 0.0
     # Stiffer arm servos than the asset's 17.8 / 0.6. MEASURED: at those gains the shoulder
     # holds 0.10-0.12 rad of error against gravity at reach (1.8-2.2 N.m), which is 45 mm at

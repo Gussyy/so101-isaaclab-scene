@@ -20,7 +20,8 @@ Controls, on the right Touch controller:
     GRIP (squeeze)   hold to move the arm -- a clutch, like lifting a mouse. Let go and the
                      arm stays put while you reposition your hand.
     TRIGGER          close the jaw while held.
-    A / X            re-centre: the arm goes to `--home`, and motion resumes from there.
+    A / X            home: the arm glides back to its start pose (position and the way the
+                     fingers point) over a few seconds, and motion resumes from there.
     B / Y            reset the scene: objects back to their start, arm to its rest pose.
 
 Frames
@@ -77,9 +78,38 @@ def yaw_lock(pos, quat):
     return (R.from_euler("z", d) * r).as_quat()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from hand_tracker import Clutch  # noqa: E402  -- pure numpy; no cv2, no mediapipe
+
+class Clutch:
+    """Holds the output still while disengaged, and re-anchors on every engage.
+
+    ``home`` is where the output sits before the controller has ever been engaged, and where A
+    puts it back. ``scale`` trades reachable volume against precision. (The same class as the
+    webcam hand tracker's; copied rather than imported so this script runs from a clean clone.)
+    """
+
+    def __init__(self, home: np.ndarray, scale: float = 1.0) -> None:
+        self.home = np.asarray(home, dtype=np.float64)
+        self.scale = float(scale)
+        self.engaged = False
+        self._out = self.home.copy()     # last emitted position, held across disengage
+        self._anchor = np.zeros(3)       # raw controller position at the moment of engaging
+
+    def toggle(self, raw: np.ndarray) -> None:
+        self.engaged = not self.engaged
+        if self.engaged:
+            self._anchor = np.asarray(raw, dtype=np.float64).copy()
+
+    def recentre(self, raw: np.ndarray) -> None:
+        self._out = self.home.copy()
+        self._anchor = np.asarray(raw, dtype=np.float64).copy()
+
+    def update(self, raw: np.ndarray) -> np.ndarray:
+        if self.engaged:
+            self._out = self._out + self.scale * (np.asarray(raw, dtype=np.float64) - self._anchor)
+            self._anchor = np.asarray(raw, dtype=np.float64).copy()
+        return self._out.copy()
+
 
 from simbridge.schema import ActionPacket, ObsPacket  # noqa: E402
 from simbridge.transport import ZmqPolicyServer  # noqa: E402
@@ -117,9 +147,12 @@ class VrDriver:
     of those with zeros would fling the arm to the origin.
     """
 
-    def __init__(self, home=(0.27, 0.0, 0.13), scale: float = 1.0, smooth: float = 0.5,
+    def __init__(self, home=None, scale: float = 1.0, smooth: float = 0.5,
                  track_rot: bool = True, log_dir: Path | None = None) -> None:
-        self.clutch = Clutch(np.asarray(home, dtype=np.float64), scale=scale)
+        # Home is the start pose: where the arm is when the simulator first reports, unless
+        # `--home` says otherwise. So the first grip never jumps and A has somewhere to go.
+        self._home_from_sim = home is None
+        self.clutch = Clutch(np.zeros(3) if home is None else np.asarray(home, dtype=np.float64), scale=scale)
         self.smooth = float(smooth)
         self.track_rot = bool(track_rot)
         # Where the fingers actually point, from the simulator (root frame, xyzw). The operator's
@@ -145,10 +178,19 @@ class VrDriver:
         self._reset_down = False
         self._reset_pending = False             # B was pressed; say so on the next reply, once
         self._orient_fresh = True               # take the orientation target from the next sim pose
+        self._ee_prev: np.ndarray | None = None  # the pose before this one: a start pose must repeat
+        self.home = self.clutch.home.copy()
+        self._q_start: np.ndarray | None = None  # how the fingers pointed at the start pose
+        self._glide = False                     # A: gliding back to the start pose
+        self._t_prev: float | None = None
+        self._clock = time.time                 # the demo swaps this for a fake clock
+        # A takes the arm home at these rates, not in one jump: 0.10 m/s is a slow reach,
+        # 1 rad/s a slow wrist turn -- about three seconds from the far side of the table.
+        self.glide_v, self.glide_w = 0.10, 1.0
         self._q_anchor = None                   # controller orientation when the clutch engaged
         self._pos = None
         self.last = np.zeros(ACTION_DIM, dtype=np.float32)
-        self.last[:3] = home
+        self.last[:3] = self.clutch.home
         self.last[3:7] = JAWS_DOWN
         self.last[7] = 1.0
         self.received = 0
@@ -234,8 +276,42 @@ class VrDriver:
         if ee is not None:
             ee = np.asarray(ee, dtype=np.float64).reshape(-1)
             self.ee_quat = ee[3:7]
+            if self._home_from_sim or self._orient_fresh:
+                # The start pose is taken only once two consecutive reports agree: the very
+                # first packet after a reset can carry the pose from BEFORE it (the frame
+                # sensor lags a step), and a home 52 mm off pulled the arm into the table.
+                from scipy.spatial.transform import Rotation as R
+
+                prev, self._ee_prev = self._ee_prev, ee.copy()
+                stable = prev is not None and np.linalg.norm(prev[:3] - ee[:3]) < 1e-3 and                     (R.from_quat(prev[3:7]) * R.from_quat(ee[3:7]).inv()).magnitude() < 0.01
+                if stable and self._home_from_sim:
+                    self._home_from_sim = False
+                    self.home = ee[:3].copy()
+                    self.clutch.home = self.home.copy()
+                    self.clutch._out = self.home.copy()
+                    self.last[:3] = self.home
+                    print(f"[vr] home = the start pose the simulator reports, {np.round(self.home, 3).tolist()}", flush=True)
+                if stable and self._orient_fresh:
+                    # The first steady pose the simulator reports (and the first after a reset)
+                    # is the orientation target until the controller turns it. It must be a
+                    # FIXED target: feeding the arm's own orientation back as the target left
+                    # the orientation unconstrained, and with three position constraints on
+                    # five weakly-driven joints the arm fell through its null space under
+                    # gravity -- the wrist went from -1.2 to +0.6 rad in 90 steps with the
+                    # grasp point never moving. That is the "gripper turns by itself" of the
+                    # first sessions. Taken here, before any controller message, so the arm
+                    # holds its start pose while the page is still connecting.
+                    self.last[3:7] = ee[3:7].copy()
+                    self._q_start = ee[3:7].copy()
+                    self._orient_fresh = False
         with self._lock:
             s = self._sample
+        if self._home_from_sim and ee is not None:
+            # Until the start pose has been reported twice, ask for exactly where the arm is:
+            # the first reply used to carry zeros and the old jaws-down default.
+            self.last[:3] = ee[:3]
+            self.last[3:7] = ee[3:7]
+            s = None
         if s is not None:
             raw = s["pos"]
             squeezing = s["squeeze"] > 0.5
@@ -247,8 +323,14 @@ class VrDriver:
                     self._q_ee_anchor = self.ee_quat if self.ee_quat is not None else self.last[3:7].copy()
             recentre = s["recentre"]
             if recentre and not self._recentre_down:    # one action per press, not per frame
+                # A: the arm goes back to its start pose slowly -- position and the way the
+                # fingers point -- while the controller's current position is mapped to home,
+                # so motion resumes from there without a jump when the glide ends.
                 self.clutch.recentre(raw)
-                self._pos = None
+                if self._pos is None:
+                    self._pos = self.home.copy()
+                self._glide = True
+                print("[vr] A: gliding back to the start pose", flush=True)
             self._recentre_down = recentre
             reset = s["reset"]
             if reset and not self._reset_down:          # B: the scene goes back to its start,
@@ -257,26 +339,27 @@ class VrDriver:
                 self._pos = None
                 self._q_anchor = self._q_ee_anchor = None   # re-anchor on the pose after the reset
                 self._orient_fresh = True
+                self._ee_prev = None                        # and only on a pose reported twice
                 print("[vr] B: scene reset requested", flush=True)
             self._reset_down = reset
 
+            now = self._clock()
+            dt = min(now - self._t_prev, 0.1) if self._t_prev is not None else 0.0
+            self._t_prev = now
             out = self.clutch.update(raw)
-            self._pos = out if self._pos is None or self.smooth >= 1.0 else (
-                (1.0 - self.smooth) * self._pos + self.smooth * out)
+            if self._glide:
+                self.clutch.recentre(raw)               # keep the controller mapped to home
+                d = self.home - self._pos
+                n = float(np.linalg.norm(d))
+                step = self.glide_v * dt
+                self._pos = self.home.copy() if n <= step else self._pos + d / n * step
+            else:
+                self._pos = out if self._pos is None or self.smooth >= 1.0 else (
+                    (1.0 - self.smooth) * self._pos + self.smooth * out)
             self.last[:3] = self._pos
             if self.track_rot:
                 from scipy.spatial.transform import Rotation as R
 
-                if self._orient_fresh and self.ee_quat is not None and not self._reset_pending:
-                    # The first pose the simulator reports (and the first after a reset) is the
-                    # orientation target until the controller turns it. It must be a FIXED
-                    # target: feeding the arm's own orientation back as the target left the
-                    # orientation unconstrained, and with three position constraints on five
-                    # weakly-driven joints the arm fell through its null space under gravity --
-                    # the wrist went from -1.2 to +0.6 rad in 90 steps with the grasp point
-                    # never moving. That is the "gripper turns by itself" of the first sessions.
-                    self.last[3:7] = self.ee_quat
-                    self._orient_fresh = False
                 if self._squeezing and self._q_anchor is None and not self._reset_pending:
                     # Gripping across a reset: the anchor was dropped, this is the first pose
                     # the simulator reports after it, so this is where the fingers point now.
@@ -289,6 +372,20 @@ class VrDriver:
                     # jaws-down as the base is unreachable below 0.22 m on this arm (docs/VR.md).
                     rel = R.from_quat(s["quat"]) * R.from_quat(self._q_anchor).inv()
                     self.last[3:7] = (rel * R.from_quat(self._q_ee_anchor)).as_quat()
+                if self._glide and self._q_start is not None:
+                    # Turn toward the start orientation at glide_w, and re-anchor the relative
+                    # rotation on the way so the controller's wrist counts from here afterwards.
+                    r0, r1 = R.from_quat(self.last[3:7]), R.from_quat(self._q_start)
+                    to_go = r1 * r0.inv()
+                    ang = float(to_go.magnitude())
+                    f = 1.0 if ang < 1e-6 else min(1.0, self.glide_w * dt / ang)
+                    self.last[3:7] = (R.from_rotvec(to_go.as_rotvec() * f) * r0).as_quat()
+                    self._q_anchor, self._q_ee_anchor = s["quat"], self.last[3:7].copy()
+                    if np.linalg.norm(self.home - self._pos) < 2e-3 and ang * (1.0 - f) < 0.02:
+                        self._glide = False
+                        print("[vr] A: at the start pose", flush=True)
+                elif self._glide and np.linalg.norm(self.home - self._pos) < 2e-3:
+                    self._glide = False
                 self.last[3:7] = yaw_lock(self.last[:3], self.last[3:7])
             self.last[7] = -1.0 if s["trigger"] > 0.5 else 1.0
 
@@ -325,16 +422,22 @@ class FakeController:
     production path. What it cannot prove is the page itself in a real Quest browser.
     """
 
-    KEYS = [                                   # (t, dx_right, dy_up, dz_forward(-z), squeeze, trigger)
-        (0.0, 0.00, 0.00, 0.00, 0.0, 0.0),
-        (1.0, 0.00, 0.00, 0.00, 1.0, 0.0),     # grip: clutch engages here, this pose = home
-        (3.0, 0.00, -0.06, 0.00, 1.0, 0.0),    # down, pads 60 mm down the block's sides (home 0.13 up)
-        (4.0, 0.00, -0.06, 0.00, 1.0, 1.0),    # trigger: close
-        (6.0, 0.00, +0.02, 0.00, 1.0, 1.0),    # lift 8 cm clear of the table
-        (8.0, -0.10, +0.02, 0.00, 1.0, 1.0),   # carry to the operator's left (-x in WebXR)
-        (9.0, -0.10, -0.05, 0.00, 1.0, 1.0),   # lower onto the tray (its lip is 10 mm up)
-        (10.0, -0.10, -0.05, 0.00, 1.0, 0.0),  # release
-        (12.0, -0.10, +0.02, 0.00, 1.0, 0.0),  # back up
+    # (t, dx_right, dy_up, dz (WebXR z: forward is negative), squeeze, trigger, wrist pitch deg)
+    # From the folded rest pose -- grasp point about (0.11, 0, 0.09), fingers pointing down --
+    # out and up to over the block at (0.27, 0, 0.13) with the wrist tilted back 80 degrees so
+    # the finger tips point slightly up (the tilt that reaches the table, docs/VR.md), then the
+    # same pick as before: down, close, lift, carry left, lower onto the tray, release.
+    KEYS = [
+        (0.0, 0.00, 0.00, 0.000, 0.0, 0.0, 0.0),
+        (1.0, 0.00, 0.00, 0.000, 1.0, 0.0, 0.0),     # grip: clutch engages here, this pose = home
+        (4.0, 0.00, +0.04, -0.155, 1.0, 0.0, 80.0),  # out over the block, wrist tilted back
+        (5.5, 0.00, -0.02, -0.155, 1.0, 0.0, 80.0),  # down, pads 60 mm down the block's sides
+        (6.5, 0.00, -0.02, -0.155, 1.0, 1.0, 80.0),  # trigger: close
+        (8.5, 0.00, +0.06, -0.155, 1.0, 1.0, 80.0),  # lift 8 cm clear of the table
+        (10.5, -0.10, +0.06, -0.155, 1.0, 1.0, 80.0),  # carry to the operator's left (-x in WebXR)
+        (11.5, -0.10, -0.015, -0.155, 1.0, 1.0, 80.0), # lower onto the tray (its lip is 10 mm up)
+        (12.5, -0.10, -0.015, -0.155, 1.0, 0.0, 80.0), # release
+        (14.0, -0.10, +0.06, -0.155, 1.0, 0.0, 80.0),  # back up
     ]
 
     def __init__(self, driver: VrDriver, rate_hz: float = 72.0) -> None:
@@ -344,20 +447,22 @@ class FakeController:
     def sample(self, t: float) -> dict:
         k = self.KEYS
         if t >= k[-1][0]:
-            _, dx, dy, dz, sq, tr = k[-1]
+            _, dx, dy, dz, sq, tr, pitch = k[-1]
         else:
-            for (t0, x1, y1, z1, s0, r0), (t1, x2, y2, z2, s1, r1) in zip(k, k[1:]):
+            for (t0, x1, y1, z1, s0, r0, p1), (t1, x2, y2, z2, s1, r1, p2) in zip(k, k[1:]):
                 if t < t1:
                     a = (t - t0) / (t1 - t0)
                     dx, dy, dz = x1 + a * (x2 - x1), y1 + a * (y2 - y1), z1 + a * (z2 - z1)
+                    pitch = p1 + a * (p2 - p1)
                     sq, tr = (s0 if a < 0.5 else s1), (r0 if a < 0.5 else r1)
                     break
         # WebXR: the controller starts 0.4 m in front of (-z) and 1.0 m above the floor. From
         # 6 s it also turns 40 degrees about the vertical, so orientation tracking is measured.
-        yaw = 40.0 * min(max((t - 6.0) / 2.0, 0.0), 1.0)
+        yaw = 40.0 * min(max((t - 10.5) / 2.0, 0.0), 1.0)
         from scipy.spatial.transform import Rotation as R
 
-        return {"pos": [dx, 1.0 + dy, -0.4 + dz], "quat": R.from_euler("y", yaw, degrees=True).as_quat().tolist(),
+        q = R.from_euler("y", yaw, degrees=True) * R.from_euler("x", pitch, degrees=True)
+        return {"pos": [dx, 1.0 + dy, -0.4 + dz], "quat": q.as_quat().tolist(),
                 "squeeze": sq, "trigger": tr, "recentre": False}
 
     def run_forever(self) -> None:
@@ -467,7 +572,7 @@ def main() -> None:
     ap.add_argument("--no-tls", action="store_true",
                     help="plain http/ws. WebXR then works only on localhost -- for a desktop test")
     ap.add_argument("--fake", action="store_true", help="scripted controller, no page, no headset")
-    ap.add_argument("--home", type=float, nargs=3, default=[0.27, 0.0, 0.13],
+    ap.add_argument("--home", type=float, nargs=3, default=None,
                     help="grasp point before the clutch is first engaged, robot root frame. "
                          "Where configs/vr_teleop.yaml's start pose puts it, so nothing jumps")
     ap.add_argument("--scale", type=float, default=1.0, help="hand travel : gripper travel")
@@ -480,7 +585,7 @@ def main() -> None:
     ap.add_argument("--no-log", action="store_true")
     args = ap.parse_args()
 
-    driver = VrDriver(home=tuple(args.home), scale=args.scale, smooth=args.smooth,
+    driver = VrDriver(home=None if args.home is None else tuple(args.home), scale=args.scale, smooth=args.smooth,
                       track_rot=not args.no_track_rot,
                       log_dir=None if args.no_log else Path(args.log))
     threading.Thread(target=driver.stream_forever, args=(args.fps, args.quality), daemon=True).start()
@@ -500,7 +605,7 @@ def main() -> None:
         print(f"[vr] open on the Quest:  {scheme}://{shown}:{args.port}/")
         if not args.no_tls:
             print("[vr] the certificate is self-signed: accept it once (Advanced -> proceed)")
-        print("[vr] GRIP = move,  TRIGGER = close jaw,  A/X = re-centre,  B/Y = reset scene")
+        print("[vr] GRIP = move,  TRIGGER = close jaw,  A/X = glide home,  B/Y = reset scene")
 
     print(f"[vr] serving actions on {args.endpoint}\n")
     server = ZmqPolicyServer(driver, endpoint=args.endpoint)
@@ -553,7 +658,9 @@ def demo() -> None:
     assert d._q_anchor is None and d._q_ee_anchor is None and d._orient_fresh, "B drops the orientation anchor"
     d.push({"pos": [5, 5, 5], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": False})
     assert not isinstance(d(obs), ActionPacket)
-    assert FakeController(d).sample(4.5)["trigger"] == 1.0
+    assert FakeController(d).sample(7.0)["trigger"] == 1.0 and FakeController(d).sample(4.5)["trigger"] == 0.0
+    from scipy.spatial.transform import Rotation as _R
+    assert abs(_R.from_quat(FakeController(d).sample(4.5)["quat"]).magnitude() - np.radians(80)) < 1e-6, "wrist tilted back by 4 s"
 
     # Frames are parked for the sender thread, and a new camera set is announced to the pages.
     class _Page:
@@ -569,7 +676,8 @@ def demo() -> None:
     from scipy.spatial.transform import Rotation as R
     d2 = VrDriver(home=(0.2, 0.0, 0.15), smooth=1.0, track_rot=True)
     ee0 = R.from_euler("x", 90, degrees=True).as_quat()                    # the sim says: jaws down
-    d2(ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee0]])}, images={}))
+    for i in range(2):
+        d2(ObsPacket(step=i, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee0]])}, images={}))
     assert np.allclose(d2(obs)[0, 3:7], ee0), "before any grip: the target is the pose the sim reported, fixed"
     d2.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d2(obs)
     q_ctrl = R.from_euler("y", 30, degrees=True).as_quat()                 # turn 30 deg about WebXR up
@@ -580,7 +688,8 @@ def demo() -> None:
     # Yaw lock: fingers level and pointing +x, target moved to the left -> they head for it.
     d3 = VrDriver(home=(0.2, 0.0, 0.15), smooth=1.0, track_rot=True)
     ee1 = R.from_euler("z", 90, degrees=True).as_quat()                    # -y of the body -> +x
-    d3(ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee1]])}, images={}))
+    for i in range(2):
+        d3(ObsPacket(step=i, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee1]])}, images={}))
     d3.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d3(obs)
     d3.push({"pos": [-0.2, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0})
     a3 = d3(obs)[0]
@@ -592,7 +701,44 @@ def demo() -> None:
     f4 = R.from_quat(yaw_lock([0.2, 0.2, 0.15], q_hook)).apply([0, -1, 0])
     assert np.allclose(f4, [-np.sqrt(0.5), -np.sqrt(0.5), 0.0], atol=1e-6), f4
     assert np.allclose(yaw_lock([0.3, 0.0, 0.1], q_hook), q_hook), "already in the plane: untouched"
-    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset")
+    # No --home: the start pose the simulator first reports is home, and is held.
+    d5 = VrDriver(smooth=1.0)
+    d5.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0})
+    a0 = d5(ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.3, 0.0, 0.2, *ee0]])}, images={}))  # stale: pre-reset
+    assert np.allclose(a0[0, :3], [0.3, 0.0, 0.2]) and np.allclose(a0[0, 3:7], ee0), "before home is known: hold where the arm is"
+    d5(ObsPacket(step=1, num_envs=1, state={"ee_pose": np.array([[0.11, 0.0, 0.09, *ee1]])}, images={}))
+    assert d5._home_from_sim, "a pose reported once is not home yet"
+    a5 = d5(ObsPacket(step=2, num_envs=1, state={"ee_pose": np.array([[0.11, 0.0, 0.09, *ee1]])}, images={}))
+    assert np.allclose(d5.home, [0.11, 0.0, 0.09]) and np.allclose(a5[0, :3], [0.11, 0.0, 0.09]), (d5.home, a5)
+    assert np.allclose(a5[0, 3:7], ee1), "the orientation target is the steady start pose, before any controller message"
+    d5.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d5(obs)
+    d5.push({"pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0})
+    assert np.allclose(d5(obs)[0, :3], [0.11, 0.0, 0.14]), "motion counts from the reported start pose"
+
+    # A: from the far side of the table, the target glides home at glide_v, never jumps, and the
+    # fingers turn back to how they pointed at the start.
+    d4 = VrDriver(home=(0.2, 0.0, 0.15), smooth=1.0, track_rot=True)
+    clock = [0.0]; d4._clock = lambda: clock[0]
+    for i in range(2):
+        d4(ObsPacket(step=i, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee1]])}, images={}))
+    d4.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d4(obs)
+    q30 = R.from_euler("y", 30, degrees=True).as_quat()
+    d4.push({"pos": [-0.2, 1.0, -0.5], "quat": q30.tolist(), "squeeze": 1, "trigger": 0}); a4 = d4(obs)[0]
+    assert np.allclose(a4[:3], [0.3, 0.2, 0.15]) and (R.from_quat(a4[3:7]) * R.from_quat(ee1).inv()).magnitude() > 0.3
+    d4.push({"pos": [-0.2, 1.0, -0.5], "quat": q30.tolist(), "squeeze": 1, "trigger": 0, "recentre": True}); d4(obs)
+    d4.push({"pos": [-0.2, 1.0, -0.5], "quat": q30.tolist(), "squeeze": 1, "trigger": 0, "recentre": False})
+    prev = np.linalg.norm(d4(obs)[0, :3] - d4.home); steps = 0
+    while d4._glide and steps < 100:
+        clock[0] += 0.05; a4 = d4(obs)[0]; steps += 1
+        dist = np.linalg.norm(a4[:3] - d4.home)
+        assert dist <= prev + 1e-6 and prev - dist <= d4.glide_v * 0.05 + 1e-6, (prev, dist)
+        prev = dist
+    assert not d4._glide and dist < 2e-3 and 20 <= steps <= 60, (steps, dist)
+    assert (R.from_quat(a4[3:7]) * R.from_quat(ee1).inv()).magnitude() < 0.03, "fingers back to the start"
+    d4.push({"pos": [-0.3, 1.0, -0.5], "quat": q30.tolist(), "squeeze": 1, "trigger": 0})
+    clock[0] += 0.05; a5 = d4(obs)[0]
+    assert np.allclose(a5[:3], [0.2, 0.1, 0.15]), a5[:3]   # motion resumes from home, no jump
+    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim")
 
 
 if __name__ == "__main__":

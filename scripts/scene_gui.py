@@ -49,8 +49,8 @@ ROBOT_ARM = {"so101_full": {"stiffness": 200.0, "damping": 5.0}}
 ROBOT_JOINTS = {
     "so101": {"shoulder_pan": 0.0, "shoulder_lift": -0.6, "elbow_flex": 0.8, "wrist_flex": 0.6,
               "wrist_roll": 0.0, "gripper": 0.0},
-    # Over the block, finger tips 9 degrees up -- the task's rest pose starts inside the object.
-    "so101_full": {"shoulder_pan": 0.0, "shoulder_lift": -0.3, "elbow_flex": 1.0, "wrist_flex": -0.6,
+    # The folded rest pose of the real arm (docs/VR.md) -- the task's own rest starts inside the object.
+    "so101_full": {"shoulder_pan": 0.0, "shoulder_lift": -1.65, "elbow_flex": 1.65, "wrist_flex": 1.3,
                    "wrist_roll": 0.0},
 }
 PHYSICS = ["physx", "newton_mjwarp", "newton_vbd"]
