@@ -410,6 +410,11 @@ def test_vr_teleop() -> None:
             and e2.actions.arm2_action.asset_name == 'robot2' and e2.actions.gripper2_action.asset_name == 'robot2' \
             and e2.scene.robot2.prim_path.endswith('/Robot2')
         print('TWOARMS' if two else 'TWO ARMS WRONG')
+        wr = e2.scene.a_wrist_right
+        print('WRISTCAM' if (wr.prim_path.endswith('/Robot/' + __import__('so101_scene.tuning', fromlist=['x']).SO101_FULL_EE_PATH + '/WristCamRight')
+                            and e2.scene.b_wrist_left.prim_path.startswith('{ENV_REGEX_NS}/Robot2/')
+                            and type(wr.spawn).__name__ == 'FisheyeCameraCfg' and wr.offset.convention == 'world')
+              else f'WRIST CAM WRONG {wr.prim_path} {type(wr.spawn).__name__}')
         print('NOMARKERS' if (not e2.actions.arm_action.debug_vis and not e2.actions.arm2_action.debug_vis
                              and not e2.commands.object_pose.debug_vis) else 'MARKERS LEFT ON')
         cfg['control']['actions'] = 'joint'
@@ -457,6 +462,7 @@ def test_vr_teleop() -> None:
     record("an unknown scene.robot.arm key is refused", "ARMKEYCHECKED" in lines, last)
     record("scene.spawn_jitter: false pins the object where placed", "NOJITTER" in lines, last)
     record("scene.robot2 adds a second arm with its own grasp frame, IK and gripper", "TWOARMS" in lines, last)
+    record("a camera with attach: gripper_base rides each arm's gripper, fisheye", "WRISTCAM" in lines, last)
     record("scene.debug_markers: false turns the goal and grasp markers off", "NOMARKERS" in lines, last)
     record("a second arm without IK actions is refused", "ARM2NEEDSIK" in lines, last)
 

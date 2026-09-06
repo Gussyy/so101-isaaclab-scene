@@ -370,6 +370,22 @@ not a claim that every pick succeeds.
 played out to nobody and the clutch anchored on the final static pose. The command never moved
 and the arm sat still for 900 steps. It now starts on the first request.
 
+## A camera on each gripper
+
+The view the LeRobot wrist camera gives — both finger tips in the bottom corners of a wide
+frame, the table ahead — is the one the operator picks by, so each gripper now carries one.
+`attach: gripper_base` on a camera mounts it on that body and it rides the arm; `pos` is then
+the offset in the gripper's own frame (fingers along −y toward the palm, +z the top of the
+housing), `pitch` the tilt down from looking along the fingers, `robot: robot2` puts it on the
+second arm, and `fisheye: 170` swaps the pinhole for the 170° Kannala-Brandt lens
+[liorbenhorin/lerobot_so101_teleop](https://github.com/liorbenhorin/lerobot_so101_teleop)
+uses for its ego camera (their polynomial, scaled to the resolution). The mount was placed by
+rendering, five mounts compared against the photo: 10 cm behind the palm, 6 cm above the
+finger line, 10° down. Closer or steeper (7.5 cm, 35°) filled the frame with fingers and lost
+the object; 20° down brought the housing into the bottom third. The right wrist camera is the headset's big front panel; the left wrist camera,
+the front view and the top view float around it. The side camera went: each camera render
+is 26 ms and four at 20 fps is where 50 steps/s still holds.
+
 ## Two arms, a crate, a mug and a soup can
 
 `scene.robot2` adds a second SO-101 beside the first: its own articulation, grasp frame

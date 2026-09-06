@@ -501,7 +501,8 @@ python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: 
 # move and turn (clutch), TRIGGER = close the jaw, A = glide back to the start pose over ~3 s,
 # B = reset the scene. Both arms start in their folded rest pose. Tilt and roll follow your
 # wrist; the heading is always toward where the arm reaches (5 joints). The scene is a crate
-# between the arms, a mug in front of the right one and a soup can in front of the left.
+# between the arms, a mug in front of the right one and a soup can in front of the left. Each
+# gripper carries a 170-degree wrist camera; the right one is the big panel in the headset.
 # Three of the simulator's cameras float in front of you; every session is logged to logs/vr/.
 ```
 

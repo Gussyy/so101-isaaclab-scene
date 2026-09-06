@@ -641,25 +641,66 @@ def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
     rate by nothing. docs/PHYSICS.md has the table and the mechanism.
 
     Aim it with ``look_at: [x, y, z]`` (env-relative), or with an explicit ``rot`` quaternion.
+
+    ``attach: gripper_base`` mounts it on the gripper instead, so it rides the arm: ``pos`` is
+    then the offset in the gripper's own frame (fingers along -y toward the palm, +z the top
+    of the housing) and ``pitch`` the tilt in degrees from looking straight along the fingers
+    toward their free ends, down toward the table. ``robot: robot2`` puts it on the second
+    arm. ``fisheye: 170`` swaps the pinhole lens for a 170-degree fisheye, the lens the
+    LeRobot wrist camera uses.
     """
     res = spec.get("resolution", [128, 128])
-    pos = _pos(spec, default=(0.55, 0.0, 0.35))
-    if "look_at" in spec:
+    prim_path = spec["prim_path"]
+    if "attach" in spec:
+        if spec["attach"] != "gripper_base":
+            raise ValueError(f"camera attach: only 'gripper_base' is known, not {spec['attach']!r}")
+        from scipy.spatial.transform import Rotation as _R
+
+        from so101_scene.tuning import SO101_FULL_EE_PATH
+
+        robot_prim = {"robot": "Robot", "robot2": "Robot2"}[spec.get("robot", "robot")]
+        prim_path = "{ENV_REGEX_NS}/" + robot_prim + "/" + SO101_FULL_EE_PATH + "/" + prim_path.rsplit("/", 1)[-1]
+        pos = _pos(spec, default=(0.0, -0.09, 0.05))
+        p = float(spec.get("pitch", 15.0)) * 3.141592653589793 / 180.0
+        import math as _m
+        fwd = (0.0, _m.cos(p), -_m.sin(p))          # along the fingers, toward the free ends, tilted down
+        up = (0.0, _m.sin(p), _m.cos(p))
+        left = (-1.0, 0.0, 0.0)
+        rot = tuple(_R.from_matrix([[fwd[0], left[0], up[0]], [fwd[1], left[1], up[1]], [fwd[2], left[2], up[2]]]).as_quat().tolist())
+        convention = "world"
+    elif "look_at" in spec:
         if "rot" in spec:
             raise ValueError("camera takes look_at or rot, not both")
+        pos = _pos(spec, default=(0.55, 0.0, 0.35))
         rot = look_at_quat(pos, tuple(spec["look_at"]), tuple(spec.get("up", (0.0, 0.0, 1.0))))
         convention = "world"
     else:
+        pos = _pos(spec, default=(0.55, 0.0, 0.35))
         rot = tuple(spec.get("rot", (0.0, 0.259, 0.0, 0.966)))
         convention = spec.get("convention", "opengl")
-    cfg = TiledCameraCfg(
-        prim_path=spec["prim_path"],
-        offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention=convention),
-        data_types=list(spec.get("data_types", ["rgb"])),
-        spawn=sim_utils.PinholeCameraCfg(
+    if "fisheye" in spec:
+        # The LeRobot wrist camera's lens (liorbenhorin/lerobot_so101_teleop): Kannala-Brandt,
+        # 170 degrees, their polynomial; only the nominal size and centre follow the resolution.
+        spawn = sim_utils.FisheyeCameraCfg(
+            projection_type="fisheyeKannalaBrandtK3",
+            fisheye_nominal_width=int(res[0]), fisheye_nominal_height=int(res[1]),
+            fisheye_optical_centre_x=int(res[0]) / 2, fisheye_optical_centre_y=int(res[1]) / 2,
+            fisheye_max_fov=float(spec["fisheye"]),
+            fisheye_polynomial_a=0.0, fisheye_polynomial_b=0.0028 * 640 / int(res[0]),
+            fisheye_polynomial_c=0.0, fisheye_polynomial_d=0.0, fisheye_polynomial_e=0.0, fisheye_polynomial_f=0.0,
+            focal_length=float(spec.get("focal_length", 2.4)),
+            clipping_range=tuple(spec.get("clipping_range", (0.01, 3.0))),
+        )
+    else:
+        spawn = sim_utils.PinholeCameraCfg(
             focal_length=float(spec.get("focal_length", 18.0)),
             clipping_range=tuple(spec.get("clipping_range", (0.01, 3.0))),
-        ),
+        )
+    cfg = TiledCameraCfg(
+        prim_path=prim_path,
+        offset=TiledCameraCfg.OffsetCfg(pos=pos, rot=rot, convention=convention),
+        data_types=list(spec.get("data_types", ["rgb"])),
+        spawn=spawn,
         width=int(res[0]),
         height=int(res[1]),
         # Render at the rate the consumer needs, not at the physics rate. A teleop screen wants

@@ -134,20 +134,42 @@ scene:
       color: [0.55, 0.42, 0.28]
 
   cameras:
-    # What the operator sees in the headset: three floating screens, the first one large.
-    # The frames ride the observation packet and a sender thread streams them to the page.
-    # 20 fps each: one camera render costs 26 ms however cheap the RTX settings, so the rate is
-    # the only dial -- 30 fps left 43 steps/s live, 20 fps clears the 50 the arm needs to run in
-    # real time (docs/VR.md). Names sort alphabetically on the page.
-    a_front:
+    # What the operator sees in the headset. The right arm's wrist camera is the big panel in
+    # front; the left arm's wrist camera, the front view and the top view float around it
+    # (names sort alphabetically on the page). The wrist cameras ride the grippers: mounted on
+    # top of the housing, 10 cm behind the palm and 6 cm above the finger line, tilted 10
+    # degrees down, with the 170-degree fisheye the LeRobot wrist camera uses -- both finger
+    # tips in the bottom corners of the frame, the table and the object ahead. 20 fps each: one camera render
+    # costs 26 ms whatever the settings, so the rate is the only dial (docs/VR.md).
+    a_wrist_right:
+      type: tiled
+      attach: gripper_base
+      robot: robot
+      prim_path: "{ENV_REGEX_NS}/WristCamRight"
+      resolution: [480, 360]
+      pos: [0.0, -0.10, 0.06]
+      pitch: 10.0
+      fisheye: 170.0
+      update_period: 0.05
+    b_wrist_left:
+      type: tiled
+      attach: gripper_base
+      robot: robot2
+      prim_path: "{ENV_REGEX_NS}/WristCamLeft"
+      resolution: [320, 240]
+      pos: [0.0, -0.10, 0.06]
+      pitch: 10.0
+      fisheye: 170.0
+      update_period: 0.05
+    c_front:
       type: tiled
       prim_path: "{ENV_REGEX_NS}/FrontCam"
-      resolution: [480, 360]
+      resolution: [320, 240]
       pos: [0.80, -0.45, 0.50]
       look_at: [0.27, 0.0, 0.06]
       focal_length: 18.0
-      update_period: 0.05       # 20 fps: a render is 26 ms whatever the settings (docs/VR.md)
-    b_top:
+      update_period: 0.05
+    d_top:
       type: tiled
       prim_path: "{ENV_REGEX_NS}/TopCam"
       resolution: [320, 240]
@@ -155,14 +177,6 @@ scene:
       look_at: [0.28, 0.0, 0.0]
       up: [1.0, 0.0, 0.0]
       focal_length: 16.0
-      update_period: 0.05
-    c_side:
-      type: tiled
-      prim_path: "{ENV_REGEX_NS}/SideCam"
-      resolution: [320, 240]
-      pos: [0.30, 0.70, 0.25]
-      look_at: [0.30, 0.0, 0.06]
-      focal_length: 18.0
       update_period: 0.05
 
 sim:

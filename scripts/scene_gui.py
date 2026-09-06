@@ -57,12 +57,15 @@ PHYSICS = ["physx", "newton_mjwarp", "newton_vbd"]
 # Object types that take a `name:` from a catalogue, and their default names.
 NAMED = {"ycb": "gelatin_box", "lehome": "burger_patty"}
 VR_CAMS = {
-    "a_front": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/FrontCam", "resolution": [480, 360],
-                "pos": [0.62, -0.30, 0.38], "look_at": [0.24, 0.02, 0.06], "focal_length": 18.0, "update_period": 0.05},
-    "b_top": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/TopCam", "resolution": [320, 240],
-              "pos": [0.32, 0.0, 0.65], "look_at": [0.32, 0.0, 0.0], "up": [1.0, 0.0, 0.0], "focal_length": 16.0, "update_period": 0.05},
-    "c_side": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/SideCam", "resolution": [320, 240],
-               "pos": [0.32, 0.55, 0.20], "look_at": [0.32, 0.0, 0.06], "focal_length": 18.0, "update_period": 0.05},
+    # The right wrist camera leads; both wrist cameras ride the grippers (docs/VR.md).
+    "a_wrist_right": {"type": "tiled", "attach": "gripper_base", "robot": "robot", "prim_path": "{ENV_REGEX_NS}/WristCamRight",
+                      "resolution": [480, 360], "pos": [0.0, -0.10, 0.06], "pitch": 10.0, "fisheye": 170.0, "update_period": 0.05},
+    "b_wrist_left": {"type": "tiled", "attach": "gripper_base", "robot": "robot2", "prim_path": "{ENV_REGEX_NS}/WristCamLeft",
+                     "resolution": [320, 240], "pos": [0.0, -0.10, 0.06], "pitch": 10.0, "fisheye": 170.0, "update_period": 0.05},
+    "c_front": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/FrontCam", "resolution": [320, 240],
+                "pos": [0.80, -0.45, 0.50], "look_at": [0.27, 0.0, 0.06], "focal_length": 18.0, "update_period": 0.05},
+    "d_top": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/TopCam", "resolution": [320, 240],
+              "pos": [0.28, 0.0, 0.80], "look_at": [0.28, 0.0, 0.0], "up": [1.0, 0.0, 0.0], "focal_length": 16.0, "update_period": 0.05},
 }
 
 
