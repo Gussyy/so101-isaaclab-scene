@@ -147,10 +147,11 @@ class VrDriver:
     of those with zeros would fling the arm to the origin.
     """
 
-    def __init__(self, home=None, scale: float = 1.0, smooth: float = 0.5,
+    def __init__(self, home=None, scale: float = 1.0, smooth: float = 0.5, hand: str = "right",
                  track_rot: bool = True, log_dir: Path | None = None) -> None:
         # Home is the start pose: where the arm is when the simulator first reports, unless
         # `--home` says otherwise. So the first grip never jumps and A has somewhere to go.
+        self.hand = hand                        # which controller, and which ee_pose key
         self._home_from_sim = home is None
         self.clutch = Clutch(np.zeros(3) if home is None else np.asarray(home, dtype=np.float64), scale=scale)
         self.smooth = float(smooth)
@@ -167,7 +168,7 @@ class VrDriver:
         self._log = None
         if log_dir is not None:
             log_dir.mkdir(parents=True, exist_ok=True)
-            path = log_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-bridge.jsonl"
+            path = log_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-bridge{'' if hand == 'right' else '-' + hand}.jsonl"
             self._log = open(path, "w", encoding="utf-8")
             print(f"[vr] session log: {path}")
         self._t0 = time.time()
@@ -272,7 +273,7 @@ class VrDriver:
     # -- from the ZeroMQ thread ----------------------------------------------------------------
     def __call__(self, obs: ObsPacket) -> np.ndarray:
         self.take_frames(obs)
-        ee = obs.state.get("ee_pose") if obs.state else None
+        ee = obs.state.get("ee_pose" if self.hand == "right" else "ee_pose2") if obs.state else None
         if ee is not None:
             ee = np.asarray(ee, dtype=np.float64).reshape(-1)
             self.ee_quat = ee[3:7]
@@ -434,10 +435,10 @@ class FakeController:
         (5.5, 0.00, -0.02, -0.155, 1.0, 0.0, 80.0),  # down, pads 60 mm down the block's sides
         (6.5, 0.00, -0.02, -0.155, 1.0, 1.0, 80.0),  # trigger: close
         (8.5, 0.00, +0.06, -0.155, 1.0, 1.0, 80.0),  # lift 8 cm clear of the table
-        (10.5, -0.10, +0.06, -0.155, 1.0, 1.0, 80.0),  # carry to the operator's left (-x in WebXR)
-        (11.5, -0.10, -0.015, -0.155, 1.0, 1.0, 80.0), # lower onto the tray (its lip is 10 mm up)
-        (12.5, -0.10, -0.015, -0.155, 1.0, 0.0, 80.0), # release
-        (14.0, -0.10, +0.06, -0.155, 1.0, 0.0, 80.0),  # back up
+        (10.5, -0.15, +0.06, -0.155, 1.0, 1.0, 80.0),  # carry 15 cm to the operator's left: over the crate
+        (11.5, -0.15, +0.01, -0.155, 1.0, 1.0, 80.0),  # lower into the crate (its walls are 6 cm)
+        (12.5, -0.15, +0.01, -0.155, 1.0, 0.0, 80.0),  # release
+        (14.0, -0.15, +0.06, -0.155, 1.0, 0.0, 80.0),  # back up
     ]
 
     def __init__(self, driver: VrDriver, rate_hz: float = 72.0) -> None:
@@ -522,6 +523,50 @@ def ensure_cert(ip: str) -> None:
     print(f"[vr] wrote a self-signed certificate for {ip} to {CERT.parent}")
 
 
+class Bimanual:
+    """Two drivers, one socket: the right controller drives arm 1, the left drives arm 2.
+
+    The simulator says how many arms it has -- a packet with ``ee_pose2`` has two -- so the
+    bridge needs no flag: the second driver wakes up when its pose first arrives, and until
+    then the reply is eight wide. Frames go to the page once (the right driver takes them);
+    a reset from either controller resets the scene.
+    """
+
+    def __init__(self, right: "VrDriver", left: "VrDriver") -> None:
+        self.right, self.left = right, left
+        self.arms = 1
+        self.pages = right.pages                    # the page set the socket handler fills
+
+    @property
+    def served(self) -> int:
+        return self.right.served
+
+    def __getattr__(self, name):
+        # Everything the page handler asks of a driver -- cam_names, announce_cams, frames --
+        # belongs to the right driver, which is the one that takes the frames.
+        return getattr(self.right, name)
+
+    def push(self, msg: dict) -> None:
+        (self.left if msg.get("hand") == "left" else self.right).push(msg)
+
+    def stream_forever(self, *a, **k) -> None:
+        self.right.stream_forever(*a, **k)
+
+    def __call__(self, obs: ObsPacket):
+        if self.arms == 1 and obs.state and "ee_pose2" in obs.state:
+            self.arms = 2
+            print("[vr] the simulator has a second arm: the left controller drives it", flush=True)
+        r = self.right(obs)
+        if self.arms == 1:
+            return r
+        l = self.left(obs)
+        rp, lp = isinstance(r, ActionPacket), isinstance(l, ActionPacket)
+        act = np.concatenate([r.action if rp else r, l.action if lp else l], axis=-1)
+        if rp or lp:
+            return ActionPacket(step=obs.step, action=act, reset=(r.reset if rp else l.reset))
+        return act
+
+
 def serve_page_and_socket(driver: VrDriver, host: str, port: int, tls: bool) -> None:
     """One port: GET / serves the page, an upgrade on /ws is the controller stream."""
     import ssl
@@ -585,9 +630,10 @@ def main() -> None:
     ap.add_argument("--no-log", action="store_true")
     args = ap.parse_args()
 
-    driver = VrDriver(home=None if args.home is None else tuple(args.home), scale=args.scale, smooth=args.smooth,
-                      track_rot=not args.no_track_rot,
-                      log_dir=None if args.no_log else Path(args.log))
+    driver = Bimanual(*(VrDriver(home=None if args.home is None else tuple(args.home), scale=args.scale,
+                                 smooth=args.smooth, hand=hand, track_rot=not args.no_track_rot,
+                                 log_dir=None if args.no_log else Path(args.log))
+                        for hand in ("right", "left")))
     threading.Thread(target=driver.stream_forever, args=(args.fps, args.quality), daemon=True).start()
 
     if args.fake:
@@ -738,7 +784,24 @@ def demo() -> None:
     d4.push({"pos": [-0.3, 1.0, -0.5], "quat": q30.tolist(), "squeeze": 1, "trigger": 0})
     clock[0] += 0.05; a5 = d4(obs)[0]
     assert np.allclose(a5[:3], [0.2, 0.1, 0.15]), a5[:3]   # motion resumes from home, no jump
-    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim")
+    # Two arms: the wrapper is 8 wide until the simulator reports ee_pose2, then 16; the left
+    # controller reaches the left driver; a reset from either side resets the scene.
+    bi = Bimanual(VrDriver(smooth=1.0, hand="right"), VrDriver(smooth=1.0, hand="left"))
+    one = ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.11, 0, 0.09, *ee1]])}, images={})
+    assert bi(one).shape == (1, 8) and bi.arms == 1
+    two = ObsPacket(step=1, num_envs=1, state={"ee_pose": np.array([[0.11, 0, 0.09, *ee1]]),
+                                               "ee_pose2": np.array([[0.11, 0, 0.09, *ee1]])}, images={})
+    bi(two); a2 = bi(two)
+    assert a2.shape == (1, 16) and bi.arms == 2 and np.allclose(a2[0, 8:11], [0.11, 0, 0.09]), a2
+    assert bi.cam_names == bi.right.cam_names and callable(bi.announce_cams), "the page handler's calls reach the right driver"
+    bi.push({"hand": "left", "pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); bi(two)
+    bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1})
+    a3 = bi(two)
+    assert np.allclose(a3[0, 8:11], [0.11, 0, 0.14]) and a3[0, 15] == -1.0 and np.allclose(a3[0, :3], [0.11, 0, 0.09]), a3
+    bi.push({"hand": "left", "pos": [0, 1.05, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 1, "reset": True})
+    r3 = bi(two)
+    assert isinstance(r3, ActionPacket) and r3.action.shape == (1, 16) and bool(r3.reset.all()), "a left-hand B resets too"
+    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset, glide home, home from sim, two arms")
 
 
 if __name__ == "__main__":

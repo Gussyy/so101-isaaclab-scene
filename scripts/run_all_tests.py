@@ -404,6 +404,23 @@ def test_vr_teleop() -> None:
             print('SINGLE JAW ACCEPTED')
 
         cfg = load_config('configs/vr_teleop.yaml')
+        e2 = build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        two = getattr(e2.scene, 'robot2', None) is not None and getattr(e2.scene, 'ee_frame2', None) is not None \
+            and type(e2.actions.arm2_action).__name__ == 'DifferentialInverseKinematicsActionCfg' \
+            and e2.actions.arm2_action.asset_name == 'robot2' and e2.actions.gripper2_action.asset_name == 'robot2' \
+            and e2.scene.robot2.prim_path.endswith('/Robot2')
+        print('TWOARMS' if two else 'TWO ARMS WRONG')
+        print('NOMARKERS' if (not e2.actions.arm_action.debug_vis and not e2.actions.arm2_action.debug_vis
+                             and not e2.commands.object_pose.debug_vis) else 'MARKERS LEFT ON')
+        cfg['control']['actions'] = 'joint'
+        try:
+            build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        except ValueError as exc:
+            print('ARM2NEEDSIK' if 'robot2' in str(exc) else f'WRONG ERROR {exc}')
+        else:
+            print('ARM2 WITHOUT IK ACCEPTED')
+
+        cfg = load_config('configs/vr_teleop.yaml')
         pr = build_env_cfg(cfg, device='cuda:0', num_envs=1).events.reset_object_position.params['pose_range']
         print('NOJITTER' if all(tuple(v) == (0.0, 0.0) for v in pr.values()) else f'JITTER LEFT ON {pr}')
         arm = build_env_cfg(cfg, device='cuda:0', num_envs=1).scene.robot.actuators['arm']
@@ -439,6 +456,9 @@ def test_vr_teleop() -> None:
     record("scene.robot.arm sets the arm servo gains", "ARMGAINS" in lines, last)
     record("an unknown scene.robot.arm key is refused", "ARMKEYCHECKED" in lines, last)
     record("scene.spawn_jitter: false pins the object where placed", "NOJITTER" in lines, last)
+    record("scene.robot2 adds a second arm with its own grasp frame, IK and gripper", "TWOARMS" in lines, last)
+    record("scene.debug_markers: false turns the goal and grasp markers off", "NOMARKERS" in lines, last)
+    record("a second arm without IK actions is refused", "ARM2NEEDSIK" in lines, last)
 
     # The page the Quest opens: exists, and speaks the one message shape the bridge parses.
     page = (REPO / "scripts/vr/index.html").read_text(encoding="utf-8")

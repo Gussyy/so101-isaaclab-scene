@@ -22,7 +22,7 @@ from simbridge import scene  # noqa: F401  (registers builtins)
 from simbridge.registry import CAMERAS, OBJECTS, ROBOTS, TASKS, lookup
 
 _TOP_LEVEL = {"task", "scene", "sim", "control", "render", "objective", "meta"}
-_SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras", "spawn_jitter"}
+_SCENE_KEYS = {"num_envs", "env_spacing", "robot", "robot2", "objects", "cameras", "spawn_jitter", "debug_markers"}
 _SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device", "lift_height"}
 
 # Named RTX settings, plus `carb_settings` for anything not surfaced here.
@@ -544,6 +544,90 @@ def apply_ik_actions(env_cfg, robot_type: str | None, orientation_weight=None) -
     return 7 + 1
 
 
+def add_second_arm(env_cfg, spec: dict[str, Any], orientation_weight=None) -> int:
+    """A second SO-101 with its own grasp frame, IK and gripper actions: ``scene.robot2``.
+
+    The task knows one robot; this adds ``robot2``, ``ee_frame2``, ``arm2_action`` and
+    ``gripper2_action`` beside it, so the action grows from 8 to 16 -- the first arm's eight,
+    then the second's -- and a teleop bridge drives one per controller. Only the parallel
+    gripper, only with ``control.actions: ik``: the joint-offset action path is the task's own
+    and names one robot. The second arm is not scored, observed or reset by the task's terms
+    -- it is scenery to the reward and a robot to the operator.
+    """
+    if spec.get("type", "so101_full") != "so101_full":
+        raise ValueError(f"scene.robot2 must be so101_full, not {spec.get('type')!r}")
+    if getattr(env_cfg.actions, "arm_action", None) is None or type(env_cfg.actions.arm_action).__name__ != "DifferentialInverseKinematicsActionCfg":
+        raise ValueError("scene.robot2 needs control.actions: ik -- the second arm is driven by a pose target")
+    from isaaclab.controllers import DifferentialIKControllerCfg
+    from isaaclab.envs.mdp.actions import BinaryJointPositionActionCfg
+    from isaaclab.envs.mdp.actions import DifferentialInverseKinematicsActionCfg as IK
+    from isaaclab.sensors import FrameTransformerCfg
+    from isaaclab.sensors.frame_transformer.frame_transformer_cfg import OffsetCfg
+
+    from so101_scene.tuning import (
+        SO101_FULL_ARM_JOINTS,
+        SO101_FULL_BASE_PATH,
+        SO101_FULL_EE_BODY,
+        SO101_FULL_EE_PATH,
+        SO101_FULL_FINGERS,
+        SO101_FULL_GRASP_OFFSET,
+    )
+
+    spec = {**spec, "type": "so101_full", "prim_path": "{ENV_REGEX_NS}/Robot2"}
+    _reject_unknown(spec.get("gripper") or {}, _GRIPPER_KEYS, "scene.robot2.gripper")
+    _reject_unknown(spec.get("arm") or {}, _ARM_KEYS, "scene.robot2.arm")
+    env_cfg.scene.robot2 = lookup(ROBOTS, "so101_full", "robot")(spec)
+    env_cfg.scene.ee_frame2 = FrameTransformerCfg(
+        prim_path="{ENV_REGEX_NS}/Robot2/" + SO101_FULL_BASE_PATH,
+        debug_vis=False,
+        target_frames=[FrameTransformerCfg.FrameCfg(
+            prim_path="{ENV_REGEX_NS}/Robot2/" + SO101_FULL_EE_PATH,
+            name="end_effector",
+            offset=OffsetCfg(pos=tuple(SO101_FULL_GRASP_OFFSET)),
+        )],
+    )
+    env_cfg.actions.arm2_action = IK(
+        asset_name="robot2",
+        joint_names=list(SO101_FULL_ARM_JOINTS),
+        body_name=SO101_FULL_EE_BODY,
+        body_offset=IK.OffsetCfg(pos=tuple(SO101_FULL_GRASP_OFFSET)),
+        controller=DifferentialIKControllerCfg(
+            command_type="pose", use_relative_mode=False, ik_method="dls",
+            **({"orientation_weight": _weight(orientation_weight)} if orientation_weight is not None else {}),
+        ),
+        scale=1.0,
+        debug_vis=False,
+    )
+    grip = env_cfg.actions.gripper_action            # already wired for the parallel fingers
+    env_cfg.actions.gripper2_action = BinaryJointPositionActionCfg(
+        asset_name="robot2",
+        joint_names=list(SO101_FULL_FINGERS),
+        open_command_expr=dict(grip.open_command_expr),
+        close_command_expr=dict(grip.close_command_expr),
+    )
+    return 7 + 1
+
+
+def apply_debug_markers(env_cfg, on: bool) -> None:
+    """The goal-pose and grasp-frame markers: on for a policy's author, off for an operator.
+
+    They are the task's pose command (``/Visuals/Command/goal_pose`` and ``body_pose``) and the
+    IK action's target frame. In a headset they float in the operator's view and mean nothing
+    to the pick, so the teleop config turns them off.
+    """
+    for term in vars(getattr(env_cfg, "commands", None) or object()).values():
+        if hasattr(term, "debug_vis"):
+            term.debug_vis = on
+    for name in ("arm_action", "arm2_action"):
+        term = getattr(env_cfg.actions, name, None)
+        if term is not None and hasattr(term, "debug_vis"):
+            term.debug_vis = on
+    for name in ("ee_frame", "ee_frame2"):
+        sensor = getattr(env_cfg.scene, name, None)
+        if sensor is not None and hasattr(sensor, "debug_vis"):
+            sensor.debug_vis = on
+
+
 def apply_lift_height(env_cfg, height: float) -> list[str]:
     """Raise the height at which the task counts the object as lifted, and return what changed.
 
@@ -617,6 +701,12 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
                          orientation_weight=ctl.get("ik_orientation_weight"))
     elif actions != "joint":
         raise ValueError(f"control.actions must be 'joint' or 'ik', got {actions!r}")
+    if (robot2 := scene_spec.get("robot2")) is not None:
+        add_second_arm(env_cfg, robot2, orientation_weight=(cfg.get("control") or {}).get("ik_orientation_weight"))
+    if "debug_markers" in scene_spec:
+        if not isinstance(scene_spec["debug_markers"], bool):
+            raise ValueError(f"scene.debug_markers must be true or false, got {scene_spec['debug_markers']!r}")
+        apply_debug_markers(env_cfg, scene_spec["debug_markers"])
 
     objects = scene_spec.get("objects") or {}
     for name, spec in objects.items():

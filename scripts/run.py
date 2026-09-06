@@ -129,9 +129,13 @@ def main() -> None:
     cams = list(((cfg.get("scene") or {}).get("cameras") or {}).keys())
     # So does the grasp point's pose, in the root frame: a teleop bridge anchors the operator's
     # orientation to where the fingers actually point, which only the simulator knows.
-    ee = env.scene["ee_frame"] if "ee_frame" in env.scene.keys() else None
-    robot = env.scene["robot"]
     from isaaclab.utils.math import subtract_frame_transforms
+
+    # One grasp frame per arm, each in its own robot's root frame: ee_pose for the first,
+    # ee_pose2 for a second arm (scene.robot2).
+    arms = [(env.scene[r], env.scene[f], key) for r, f, key in
+            (("robot", "ee_frame", "ee_pose"), ("robot2", "ee_frame2", "ee_pose2"))
+            if f in env.scene.keys()]
 
     log = None
     if not args_cli.no_log and (cfg.get("control") or {}).get("source") == "zmq":
@@ -158,12 +162,12 @@ def main() -> None:
                     rgb = env.scene[name].data.output.get("rgb")
                     if rgb is not None:
                         packet.images[name] = rgb[:1, ..., :3].detach().cpu().numpy()
-            if ee is not None:
+            for robot, ee, key in arms:
                 p_b, q_b = subtract_frame_transforms(
                     robot.data.root_pos_w.torch, robot.data.root_quat_w.torch,
                     ee.data.target_pos_w.torch[:, 0], ee.data.target_quat_w.torch[:, 0],
                 )
-                packet.state["ee_pose"] = torch.cat([p_b, q_b], dim=-1).detach().cpu().numpy()
+                packet.state[key] = torch.cat([p_b, q_b], dim=-1).detach().cpu().numpy()
             action = source.advance(packet)
             was_reset = getattr(source, "last_reset", None) is not None
             if was_reset:

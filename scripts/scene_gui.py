@@ -150,6 +150,10 @@ class SceneGui:
         ttk.Checkbutton(f, text="VR screens: front, top, side cameras (slow on Newton -- docs/PHYSICS.md)", variable=self.camera).grid(row=6, column=0, columnspan=3, sticky="w", **pad)
         self.vr = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="also start the VR bridge (scripts/vr_gripper_server.py)", variable=self.vr).grid(row=7, column=0, columnspan=3, sticky="w", **pad)
+        self.arm2 = tk.BooleanVar(value=True)
+        ttk.Checkbutton(f, text="second arm, driven by the left controller (30 cm to the left of the first)", variable=self.arm2).grid(row=7, column=3, sticky="w", **pad)
+        self.markers = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="show the goal-pose and grasp-frame markers", variable=self.markers).grid(row=6, column=3, sticky="w", **pad)
         self.jitter = tk.BooleanVar(value=False)
         ttk.Checkbutton(f, text="re-place objects at random on every reset (training; off = exactly where placed)", variable=self.jitter).grid(row=8, column=0, columnspan=4, sticky="w", **pad)
         self.viewer = tk.BooleanVar(value=False)
@@ -195,8 +199,13 @@ class SceneGui:
                 "num_envs": int(self.num_envs.get()),
                 "env_spacing": 1.0,
                 "spawn_jitter": bool(self.jitter.get()),
+                "debug_markers": bool(self.markers.get()),
                 "robot": {"type": robot, "rot": ROBOT_ROT[robot], "joint_pos": ROBOT_JOINTS[robot],
+                          **({"pos": [0.0, -0.15, 0.0]} if self.arm2.get() and robot == "so101_full" else {}),
                           **({"arm": ROBOT_ARM[robot]} if robot in ROBOT_ARM else {})},
+                **({"robot2": {"type": robot, "pos": [0.0, 0.15, 0.0], "rot": ROBOT_ROT[robot],
+                               "joint_pos": ROBOT_JOINTS[robot], "arm": ROBOT_ARM[robot]}}
+                   if self.arm2.get() and robot == "so101_full" and self.ik.get() else {}),
                 "objects": objects,
             },
             # One env on PhysX steps 4x faster on the CPU (docs/VR.md); Newton needs cuda.
@@ -219,6 +228,8 @@ class SceneGui:
         self.physics.set(sim.get("physics", "physx"))
         self.num_envs.set(str(scene.get("num_envs", 1)))
         self.jitter.set(bool(scene.get("spawn_jitter", True)))
+        self.arm2.set("robot2" in scene)
+        self.markers.set(bool(scene.get("debug_markers", True)))
         self.episode.set(str(sim.get("episode_length_s", 600)))
         self.source.set(ctl.get("source", "zero"))
         self.ik.set(ctl.get("actions") == "ik")
@@ -279,12 +290,13 @@ def demo() -> None:
     cfg = gui.to_config()
     assert cfg["scene"]["robot"]["type"] == "so101_full" and cfg["scene"]["robot"]["rot"] == ROBOT_ROT["so101_full"]
     assert cfg["control"]["actions"] == "ik" and cfg["control"]["source"] == "zmq"
-    assert set(cfg["scene"]["objects"]) == {"object", "tray"}, cfg["scene"]["objects"]
-    assert cfg["scene"]["objects"]["tray"]["type"] == "static_cuboid"   # static-ness is the type here
     src = yaml.safe_load((REPO / "configs" / "vr_teleop.yaml").read_text(encoding="utf-8"))
-    assert cfg["scene"]["objects"]["object"]["size"] == src["scene"]["objects"]["object"]["size"], "extra keys must survive"
+    assert set(cfg["scene"]["objects"]) == set(src["scene"]["objects"]), cfg["scene"]["objects"]
+    assert cfg["scene"]["objects"]["crate_floor"]["type"] == "static_cuboid"   # static-ness is the type here
+    assert cfg["scene"]["objects"]["object"]["name"] == src["scene"]["objects"]["object"]["name"], "extra keys must survive"
     assert cfg["scene"]["robot"]["arm"] == src["scene"]["robot"]["arm"], "the arm gains the config measured"
     assert cfg["scene"]["spawn_jitter"] is False, "teleop config: objects spawn where placed"
+    assert cfg["scene"]["robot2"]["pos"] == [0.0, 0.15, 0.0] and cfg["scene"]["debug_markers"] is False
     from simbridge.builder import load_config  # the builder must accept what the form writes
     tmp = REPO / "configs" / "gui_scene.yaml"
     gui.write(tmp)

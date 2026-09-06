@@ -175,12 +175,13 @@ async function enterVR() {
       }
     }
     for (const src of session.inputSources) {
-      if (src.handedness !== 'right' || !src.gripSpace) continue;
+      if ((src.handedness !== 'right' && src.handedness !== 'left') || !src.gripSpace) continue;
       const p = frame.getPose(src.gripSpace, ref);
       if (!p) continue;
       const q = p.transform.orientation, b = src.gamepad ? src.gamepad.buttons : [];
       // xr-standard mapping, confirmed on a Quest 3: 0 trigger, 1 squeeze, 4 = A / X, 5 = B / Y.
       const msg = {
+        hand: src.handedness,       // right drives arm 1, left drives arm 2 (if the scene has one)
         pos: [p.transform.position.x, p.transform.position.y, p.transform.position.z],
         quat: [q.x, q.y, q.z, q.w],
         trigger: b[0] ? b[0].value : 0, squeeze: b[1] ? b[1].value : 0,

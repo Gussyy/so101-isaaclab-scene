@@ -370,6 +370,38 @@ not a claim that every pick succeeds.
 played out to nobody and the clutch anchored on the final static pose. The command never moved
 and the arm sat still for 900 steps. It now starts on the first request.
 
+## Two arms, a crate, a mug and a soup can
+
+`scene.robot2` adds a second SO-101 beside the first: its own articulation, grasp frame
+(`ee_frame2`, reported as `ee_pose2`), IK and gripper actions, so the action grows from 8 to
+16 — the first arm's eight, then the second's. The bridge needs no flag: the first packet that
+carries `ee_pose2` wakes the left driver, and from then on the **right controller drives the
+right arm and the left controller the left**, each with its own home, clutch, glide and
+orientation anchor; B on either resets the scene. Only the parallel gripper with
+`control.actions: ik`; the task's reward, observations and resets still watch one robot and
+one object, so the second arm is scenery to the score and a robot to the operator.
+
+The shipped scene puts the arms 30 cm apart (y = ∓0.15, right and left as the operator sees
+them) with a crate between them — a 16 cm floor and four 6 cm walls, static boxes — and real
+things from Isaac Sim's YCB set 0.35 m in front of each arm, under the finger pads at the
+start pose: a **mug** (81 mm across, 120 g, handle turned away) for the right arm and a
+**tomato soup can** (68 mm, 200 g) for the left. Both are a pinch across the body for fingers
+that close to 49 mm and open to 134. The props stream from the asset server on first use and
+are cached after. The arms' reach at table height is 0.26–0.31 m from their own base, which
+is why each object sits in front of its own arm and the crate sits between them: lifting over
+the wall takes 7 cm, and the crate's near half is within both arms' reach.
+
+The goal-pose and grasp-frame markers (`/Visuals/Command/*` and the IK target frame) are off:
+`scene.debug_markers: false`. They are for a policy's author and float in the operator's view.
+
+**Cloth folding is not in this scene, on purpose.** LeHome's shirt runs here as Newton VBD
+cloth (`configs/lehome_bedroom_shirt.yaml`, docs/LEHOME.md), but a deformable scene with a
+camera renders at 1.9 steps/s (docs/PHYSICS.md) against the 50 the arm needs to move in real
+time, and a single one of these grippers could not lift the cloth in the measured attempts.
+It stays a separate config until the solver and the grasp are both there.
+
+**The two-arm mock, fake controller on the right arm, the left arm holding:** the right arm reaches out from its rest pose, tilts, closes on the mug at 71 mm, lifts it to 123 mm, carries it 150 mm to the crate and releases it inside (the mug settles at 83 mm, leaning on a wall). Tracking error over the 940 steps after the first request **6.6 mm mean**, orientation **4.4° mean**; the left arm holds its rest pose to the millimetre throughout — **CARRIED**.
+
 ## Making it fast: where a step goes
 
 The target is 50 steps/s — the environment steps at 50 Hz (`dt` 0.01, decimation 2), so that
