@@ -523,7 +523,7 @@ def Scope "Instances"
             apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
         )
         {
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             token purpose = "guide"
         }
     }
@@ -560,7 +560,7 @@ def Scope "Instances"
             apiSchemas = ["PhysicsCollisionAPI", "NewtonCollisionAPI", "PhysicsMeshCollisionAPI", "NewtonMeshCollisionAPI"]
         )
         {
-            token physics:approximation = "convexHull"
+            token physics:approximation = "convexDecomposition"
             token purpose = "guide"
         }
     }

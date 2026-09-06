@@ -22,7 +22,7 @@ from simbridge import scene  # noqa: F401  (registers builtins)
 from simbridge.registry import CAMERAS, OBJECTS, ROBOTS, TASKS, lookup
 
 _TOP_LEVEL = {"task", "scene", "sim", "control", "render", "objective", "meta"}
-_SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras"}
+_SCENE_KEYS = {"num_envs", "env_spacing", "robot", "objects", "cameras", "spawn_jitter"}
 _SIM_KEYS = {"episode_length_s", "dt", "decimation", "physics", "device", "lift_height"}
 
 # Named RTX settings, plus `carb_settings` for anything not surfaced here.
@@ -272,6 +272,8 @@ def physics_options(preset) -> dict[str, Any]:
 # What a `scene.robot.gripper` block may set. Rejected up front like every other config key --
 # a typo'd `stifness` that silently leaves the default is the bug this repo keeps re-learning.
 _GRIPPER_KEYS = {"open", "close", "stiffness", "damping", "effort", "velocity"}
+# What a `scene.robot.arm` block may set: the five arm servos' PD gains and torque cap.
+_ARM_KEYS = {"stiffness", "damping", "effort"}
 
 
 def apply_cloth_proxy_bodies(env_cfg, leaf_names) -> list[str]:
@@ -313,12 +315,17 @@ def apply_robot_wiring(env_cfg, robot_spec: dict[str, Any]) -> None:
     robot_type = robot_spec.get("type")
     grip_spec = robot_spec.get("gripper") or {}
     _reject_unknown(grip_spec, _GRIPPER_KEYS, "scene.robot.gripper")
+    arm_spec = robot_spec.get("arm") or {}
+    _reject_unknown(arm_spec, _ARM_KEYS, "scene.robot.arm")
+    for k, v in arm_spec.items():
+        if not isinstance(v, (int, float)) or v <= 0:
+            raise ValueError(f"scene.robot.arm.{k} must be a positive number, got {v!r}")
     if robot_type != "so101_full":
-        if grip_spec:
+        if grip_spec or arm_spec:
             raise ValueError(
-                f"scene.robot.gripper is only supported for 'so101_full', not {robot_type!r}. "
-                "The single-jaw so101 drives one revolute joint; its open/close values live in "
-                "the task."
+                f"scene.robot.gripper / scene.robot.arm are only supported for 'so101_full', "
+                f"not {robot_type!r}. The single-jaw so101 drives one revolute joint; its "
+                "open/close values and gains live in the task."
             )
         return
     from so101_scene.tuning import (
@@ -577,6 +584,19 @@ def build_env_cfg(cfg: dict[str, Any], device: str = "cuda:0", num_envs: int | N
 
     if "env_spacing" in scene_spec:
         env_cfg.scene.env_spacing = float(scene_spec["env_spacing"])
+    if "spawn_jitter" in scene_spec:
+        # The task re-places the object at every reset, +-3 cm in x and +-6 cm in y, which is
+        # what a policy should train against and what a teleoperator should not be surprised
+        # by: a block that spawns under the gripper in one reset and clear of it in the next
+        # made the mock test's failures unrepeatable (docs/VR.md). Off = exactly where `pos`
+        # says. The range stays the task's when the key is absent.
+        if not isinstance(scene_spec["spawn_jitter"], bool):
+            raise ValueError(f"scene.spawn_jitter must be true or false, got {scene_spec['spawn_jitter']!r}")
+        if not scene_spec["spawn_jitter"]:
+            ev = getattr(env_cfg.events, "reset_object_position", None)
+            if ev is None:
+                raise ValueError("scene.spawn_jitter is set but the task has no reset_object_position event")
+            ev.params["pose_range"] = {"x": (0.0, 0.0), "y": (0.0, 0.0), "z": (0.0, 0.0)}
     if "episode_length_s" in sim_spec:
         env_cfg.episode_length_s = float(sim_spec["episode_length_s"])
     if "decimation" in sim_spec:

@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import ipaddress
 import json
+import math
 import socket
 import sys
 import threading
@@ -48,6 +49,32 @@ import time
 from pathlib import Path
 
 import numpy as np
+
+
+def yaw_lock(pos, quat):
+    """Turn the commanded orientation about the world's up so the fingers head toward `pos`.
+
+    Five joints: base yaw, three pitches in one vertical plane, wrist roll. The fingers' heading
+    IS the base yaw, and the base yaw is wherever the arm is reaching, so a commanded heading
+    other than atan2(y, x) of the target is unreachable and the IK trades position for it
+    (37 mm off at the tray, measured). Projecting it out costs nothing the arm could have done;
+    pitch and roll -- the parts five joints can follow -- are kept. Skipped when the fingers
+    point within ~11 degrees of vertical, where "heading" is noise.
+
+    The fingers may point either way along that plane: at the shipped start pose they point
+    BACK toward the base, hooked under the wrist (heading 180 degrees from the target). So the
+    turn is the smallest one that puts the heading in the plane, wrapped to +-90 degrees --
+    the first version turned the target half a circle and the arm contorted trying to follow.
+    """
+    from scipy.spatial.transform import Rotation as R
+
+    r = R.from_quat(quat)
+    f = r.apply([0.0, -1.0, 0.0])           # gripper_base -y is the finger direction (body_offset)
+    if math.hypot(f[0], f[1]) < 0.2:
+        return np.asarray(quat, dtype=np.float64)
+    d = math.atan2(pos[1], pos[0]) - math.atan2(f[1], f[0])
+    d = (d + math.pi / 2) % math.pi - math.pi / 2
+    return (R.from_euler("z", d) * r).as_quat()
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -58,6 +85,7 @@ from simbridge.schema import ActionPacket, ObsPacket  # noqa: E402
 from simbridge.transport import ZmqPolicyServer  # noqa: E402
 
 ACTION_DIM = 8
+LOG_DIR = Path(__file__).resolve().parent.parent / "logs" / "vr"
 PAGE = Path(__file__).resolve().parent / "vr" / "index.html"
 CERT = Path(__file__).resolve().parent / "vr" / "cert.pem"
 KEY = Path(__file__).resolve().parent / "vr" / "key.pem"
@@ -89,17 +117,34 @@ class VrDriver:
     of those with zeros would fling the arm to the origin.
     """
 
-    def __init__(self, home=(0.27, 0.0, 0.12), scale: float = 1.0, smooth: float = 0.5,
-                 track_rot: bool = False) -> None:
+    def __init__(self, home=(0.27, 0.0, 0.13), scale: float = 1.0, smooth: float = 0.5,
+                 track_rot: bool = True, log_dir: Path | None = None) -> None:
         self.clutch = Clutch(np.asarray(home, dtype=np.float64), scale=scale)
         self.smooth = float(smooth)
         self.track_rot = bool(track_rot)
+        # Where the fingers actually point, from the simulator (root frame, xyzw). The operator's
+        # rotation is applied RELATIVE to this, anchored at the moment the grip closes -- so the
+        # arm never has to jump to an orientation it may not be able to reach, and turning the
+        # controller turns the fingers from wherever they are.
+        self.ee_quat: np.ndarray | None = None
+        self._q_ee_anchor: np.ndarray | None = None
+        self.frames: dict = {}                  # camera name -> latest frame; a sender thread encodes
+        self._frames_lock = threading.Lock()
+        self.cam_names: list[str] = []
+        self._log = None
+        if log_dir is not None:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            path = log_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-bridge.jsonl"
+            self._log = open(path, "w", encoding="utf-8")
+            print(f"[vr] session log: {path}")
+        self._t0 = time.time()
         self._lock = threading.Lock()
         self._sample = None                     # latest dict from the page, in the sim frame
         self._squeezing = False
         self._recentre_down = False
         self._reset_down = False
         self._reset_pending = False             # B was pressed; say so on the next reply, once
+        self._orient_fresh = True               # take the orientation target from the next sim pose
         self._q_anchor = None                   # controller orientation when the clutch engaged
         self._pos = None
         self.last = np.zeros(ACTION_DIM, dtype=np.float32)
@@ -133,39 +178,62 @@ class VrDriver:
             self.received += 1
 
     # -- frames to the page --------------------------------------------------------------------
-    def broadcast_frame(self, obs: ObsPacket, max_hz: float = 15.0) -> None:
-        """The simulator's camera, as a JPEG, to every connected page. Best effort, rate-capped.
+    def take_frames(self, obs: ObsPacket) -> None:
+        """Keep the latest frame per camera. Encoding and sending happen on their own thread,
+        so a slow page or a big JPEG never delays the reply the simulator is waiting on."""
+        if not obs.images:
+            return
+        names = sorted(obs.images)
+        with self._frames_lock:
+            self.frames = {n: np.asarray(obs.images[n])[0] if np.asarray(obs.images[n]).ndim == 4
+                           else np.asarray(obs.images[n]) for n in names}
+        if names != self.cam_names:
+            self.cam_names = names
+            self.announce_cams()
 
-        A screen in the headset is what makes the session usable at all -- without it the
-        operator sees black and steers from the monitor. The frame arrives on the same packet
-        the actions are answered for, so this costs one JPEG encode and no new socket.
-        """
-        if not obs.images or not self.pages:
-            return
-        now = time.time()
-        if now - self._last_frame_t < 1.0 / max_hz:
-            return
-        self._last_frame_t = now
+    def announce_cams(self, ws=None) -> None:
+        msg = json.dumps({"type": "cams", "names": self.cam_names})
+        for conn in ([ws] if ws is not None else list(self.pages)):
+            try:
+                conn.send(msg)
+            except Exception:  # noqa: BLE001
+                self.pages.discard(conn)
+
+    def stream_forever(self, max_hz: float = 30.0, quality: int = 60) -> None:
+        """Sender thread: every camera's latest frame as `index byte + JPEG`, rate-capped."""
         import io as _io
 
         from PIL import Image
 
-        arr = next(iter(obs.images.values()))
-        arr = np.asarray(arr)
-        if arr.ndim == 4:
-            arr = arr[0]
-        buf = _io.BytesIO()
-        Image.fromarray(np.ascontiguousarray(arr[..., :3]).astype(np.uint8)).save(buf, "JPEG", quality=70)
-        data = buf.getvalue()
-        for ws in list(self.pages):
-            try:
-                ws.send(data)                      # binary frame; the page draws it on the screen
-            except Exception:  # noqa: BLE001  -- a page that went away is dropped by its handler
-                self.pages.discard(ws)
+        period = 1.0 / max_hz
+        while True:
+            t = time.time()
+            with self._frames_lock:
+                frames = dict(self.frames)
+                self.frames = {}
+            if frames and self.pages:
+                for i, name in enumerate(self.cam_names):
+                    arr = frames.get(name)
+                    if arr is None:
+                        continue
+                    buf = _io.BytesIO()
+                    Image.fromarray(np.ascontiguousarray(arr[..., :3]).astype(np.uint8)).save(
+                        buf, "JPEG", quality=quality)
+                    data = bytes([i]) + buf.getvalue()
+                    for ws in list(self.pages):
+                        try:
+                            ws.send(data)
+                        except Exception:  # noqa: BLE001  -- a page that went away
+                            self.pages.discard(ws)
+            time.sleep(max(0.0, period - (time.time() - t)))
 
     # -- from the ZeroMQ thread ----------------------------------------------------------------
     def __call__(self, obs: ObsPacket) -> np.ndarray:
-        self.broadcast_frame(obs)
+        self.take_frames(obs)
+        ee = obs.state.get("ee_pose") if obs.state else None
+        if ee is not None:
+            ee = np.asarray(ee, dtype=np.float64).reshape(-1)
+            self.ee_quat = ee[3:7]
         with self._lock:
             s = self._sample
         if s is not None:
@@ -174,7 +242,9 @@ class VrDriver:
             if squeezing != self._squeezing:            # clutch on the grip button's edges
                 self.clutch.toggle(raw)
                 self._squeezing = squeezing
-                self._q_anchor = s["quat"] if squeezing else self._q_anchor
+                if squeezing:
+                    self._q_anchor = s["quat"]
+                    self._q_ee_anchor = self.ee_quat if self.ee_quat is not None else self.last[3:7].copy()
             recentre = s["recentre"]
             if recentre and not self._recentre_down:    # one action per press, not per frame
                 self.clutch.recentre(raw)
@@ -185,6 +255,8 @@ class VrDriver:
                 self._reset_pending = True              # and the target goes home with it
                 self.clutch.recentre(raw)
                 self._pos = None
+                self._q_anchor = self._q_ee_anchor = None   # re-anchor on the pose after the reset
+                self._orient_fresh = True
                 print("[vr] B: scene reset requested", flush=True)
             self._reset_down = reset
 
@@ -192,18 +264,45 @@ class VrDriver:
             self._pos = out if self._pos is None or self.smooth >= 1.0 else (
                 (1.0 - self.smooth) * self._pos + self.smooth * out)
             self.last[:3] = self._pos
-            if self.track_rot and self._squeezing and self._q_anchor is not None:
+            if self.track_rot:
                 from scipy.spatial.transform import Rotation as R
 
-                # Orientation relative to where the controller was when the grip closed, applied
-                # on top of jaws-down. Absolute controller orientation would make "rest" mean
-                # "pointing the jaws wherever the controller happens to point", which is never
-                # down.
-                rel = R.from_quat(s["quat"]) * R.from_quat(self._q_anchor).inv()
-                self.last[3:7] = (rel * R.from_quat(JAWS_DOWN)).as_quat()
+                if self._orient_fresh and self.ee_quat is not None and not self._reset_pending:
+                    # The first pose the simulator reports (and the first after a reset) is the
+                    # orientation target until the controller turns it. It must be a FIXED
+                    # target: feeding the arm's own orientation back as the target left the
+                    # orientation unconstrained, and with three position constraints on five
+                    # weakly-driven joints the arm fell through its null space under gravity --
+                    # the wrist went from -1.2 to +0.6 rad in 90 steps with the grasp point
+                    # never moving. That is the "gripper turns by itself" of the first sessions.
+                    self.last[3:7] = self.ee_quat
+                    self._orient_fresh = False
+                if self._squeezing and self._q_anchor is None and not self._reset_pending:
+                    # Gripping across a reset: the anchor was dropped, this is the first pose
+                    # the simulator reports after it, so this is where the fingers point now.
+                    self._q_anchor = s["quat"]
+                    self._q_ee_anchor = self.ee_quat if self.ee_quat is not None else self.last[3:7].copy()
+                if self._squeezing and self._q_anchor is not None:
+                    # How far the controller has turned since the grip closed, applied to how
+                    # the fingers were pointing when it closed. Absolute controller orientation
+                    # would make "rest" mean "wherever the controller happens to point", and
+                    # jaws-down as the base is unreachable below 0.22 m on this arm (docs/VR.md).
+                    rel = R.from_quat(s["quat"]) * R.from_quat(self._q_anchor).inv()
+                    self.last[3:7] = (rel * R.from_quat(self._q_ee_anchor)).as_quat()
+                self.last[3:7] = yaw_lock(self.last[:3], self.last[3:7])
             self.last[7] = -1.0 if s["trigger"] > 0.5 else 1.0
 
         self.served += 1
+        if self._log is not None:
+            rec = {"t": round(time.time() - self._t0, 4), "step": obs.step, "engaged": self.clutch.engaged,
+                   "action": self.last.round(5).tolist()}
+            if s is not None:
+                rec.update({"ctrl_pos": np.round(s["pos"], 5).tolist(), "ctrl_quat": np.round(s["quat"], 5).tolist(),
+                            "squeeze": s["squeeze"], "trigger": s["trigger"], "recentre": s["recentre"],
+                            "reset": s["reset"]})
+            if self.ee_quat is not None:
+                rec["ee_quat"] = np.round(self.ee_quat, 5).tolist()
+            self._log.write(json.dumps(rec) + chr(10))
         if self.served % 60 == 0:
             x, y, z = self.last[:3]
             state = "ENGAGED" if self.clutch.engaged else "held"
@@ -229,13 +328,13 @@ class FakeController:
     KEYS = [                                   # (t, dx_right, dy_up, dz_forward(-z), squeeze, trigger)
         (0.0, 0.00, 0.00, 0.00, 0.0, 0.0),
         (1.0, 0.00, 0.00, 0.00, 1.0, 0.0),     # grip: clutch engages here, this pose = home
-        (3.0, 0.00, -0.10, 0.00, 1.0, 0.0),    # down onto the block (home is 0.12 up)
-        (4.0, 0.00, -0.10, 0.00, 1.0, 1.0),    # trigger: close
-        (6.0, 0.00, -0.02, 0.00, 1.0, 1.0),    # lift
-        (8.0, -0.10, -0.02, 0.00, 1.0, 1.0),   # carry to the operator's left (-x in WebXR)
-        (9.0, -0.10, -0.08, 0.00, 1.0, 1.0),   # lower
-        (10.0, -0.10, -0.08, 0.00, 1.0, 0.0),  # release
-        (12.0, -0.10, -0.02, 0.00, 1.0, 0.0),  # back up
+        (3.0, 0.00, -0.06, 0.00, 1.0, 0.0),    # down, pads 60 mm down the block's sides (home 0.13 up)
+        (4.0, 0.00, -0.06, 0.00, 1.0, 1.0),    # trigger: close
+        (6.0, 0.00, +0.02, 0.00, 1.0, 1.0),    # lift 8 cm clear of the table
+        (8.0, -0.10, +0.02, 0.00, 1.0, 1.0),   # carry to the operator's left (-x in WebXR)
+        (9.0, -0.10, -0.05, 0.00, 1.0, 1.0),   # lower onto the tray (its lip is 10 mm up)
+        (10.0, -0.10, -0.05, 0.00, 1.0, 0.0),  # release
+        (12.0, -0.10, +0.02, 0.00, 1.0, 0.0),  # back up
     ]
 
     def __init__(self, driver: VrDriver, rate_hz: float = 72.0) -> None:
@@ -253,8 +352,12 @@ class FakeController:
                     dx, dy, dz = x1 + a * (x2 - x1), y1 + a * (y2 - y1), z1 + a * (z2 - z1)
                     sq, tr = (s0 if a < 0.5 else s1), (r0 if a < 0.5 else r1)
                     break
-        # WebXR: the controller starts 0.4 m in front of (-z) and 1.0 m above the floor.
-        return {"pos": [dx, 1.0 + dy, -0.4 + dz], "quat": [0.0, 0.0, 0.0, 1.0],
+        # WebXR: the controller starts 0.4 m in front of (-z) and 1.0 m above the floor. From
+        # 6 s it also turns 40 degrees about the vertical, so orientation tracking is measured.
+        yaw = 40.0 * min(max((t - 6.0) / 2.0, 0.0), 1.0)
+        from scipy.spatial.transform import Rotation as R
+
+        return {"pos": [dx, 1.0 + dy, -0.4 + dz], "quat": R.from_euler("y", yaw, degrees=True).as_quat().tolist(),
                 "squeeze": sq, "trigger": tr, "recentre": False}
 
     def run_forever(self) -> None:
@@ -335,6 +438,8 @@ def serve_page_and_socket(driver: VrDriver, host: str, port: int, tls: bool) -> 
     def handler(ws):
         print(f"\n[vr] page connected from {ws.remote_address[0]}", flush=True)
         driver.pages.add(ws)
+        if driver.cam_names:
+            driver.announce_cams(ws)
         try:
             for raw in ws:
                 if isinstance(raw, bytes):
@@ -362,17 +467,23 @@ def main() -> None:
     ap.add_argument("--no-tls", action="store_true",
                     help="plain http/ws. WebXR then works only on localhost -- for a desktop test")
     ap.add_argument("--fake", action="store_true", help="scripted controller, no page, no headset")
-    ap.add_argument("--home", type=float, nargs=3, default=[0.27, 0.0, 0.12],
+    ap.add_argument("--home", type=float, nargs=3, default=[0.27, 0.0, 0.13],
                     help="grasp point before the clutch is first engaged, robot root frame. "
-                         "0.27 m out: the only place this arm reaches table height (docs/VR.md)")
+                         "Where configs/vr_teleop.yaml's start pose puts it, so nothing jumps")
     ap.add_argument("--scale", type=float, default=1.0, help="hand travel : gripper travel")
     ap.add_argument("--smooth", type=float, default=0.5, help="EMA factor; 1.0 = off")
-    ap.add_argument("--track-rot", action="store_true",
-                    help="follow the controller's orientation (relative to the grip anchor)")
+    ap.add_argument("--no-track-rot", action="store_true",
+                    help="pin the fingers' orientation instead of following the controller's")
+    ap.add_argument("--fps", type=float, default=30.0, help="camera stream cap, frames per second")
+    ap.add_argument("--quality", type=int, default=60, help="JPEG quality of the stream")
+    ap.add_argument("--log", default=str(LOG_DIR), help="directory for the per-session JSONL")
+    ap.add_argument("--no-log", action="store_true")
     args = ap.parse_args()
 
     driver = VrDriver(home=tuple(args.home), scale=args.scale, smooth=args.smooth,
-                      track_rot=args.track_rot)
+                      track_rot=not args.no_track_rot,
+                      log_dir=None if args.no_log else Path(args.log))
+    threading.Thread(target=driver.stream_forever, args=(args.fps, args.quality), daemon=True).start()
 
     if args.fake:
         threading.Thread(target=FakeController(driver).run_forever, daemon=True).start()
@@ -439,21 +550,49 @@ def demo() -> None:
     r = d(obs)
     assert isinstance(r, ActionPacket) and bool(r.reset.all()) and np.allclose(r.action[0, :3], [0.2, 0.0, 0.15]), r
     assert not isinstance(d(obs), ActionPacket), "held B must not reset again"
+    assert d._q_anchor is None and d._q_ee_anchor is None and d._orient_fresh, "B drops the orientation anchor"
     d.push({"pos": [5, 5, 5], "quat": [0, 0, 0, 1], "squeeze": 0, "trigger": 0, "reset": False})
     assert not isinstance(d(obs), ActionPacket)
     assert FakeController(d).sample(4.5)["trigger"] == 1.0
 
-    # A frame on the packet reaches every page as a JPEG; no page, no encode.
+    # Frames are parked for the sender thread, and a new camera set is announced to the pages.
     class _Page:
         def __init__(self): self.got = []
         def send(self, data): self.got.append(data)
-    page = _Page(); d.pages.add(page); d._last_frame_t = 0.0
+    page = _Page(); d.pages.add(page)
     frame = np.zeros((1, 12, 16, 3), dtype=np.uint8); frame[..., 0] = 200
-    d(ObsPacket(step=1, num_envs=1, state={}, images={"cam": frame}))
-    assert len(page.got) == 1 and page.got[0][:2] == b"\xff\xd8", "expected one JPEG"
-    d(ObsPacket(step=2, num_envs=1, state={}, images={"cam": frame}))
-    assert len(page.got) == 1, "rate cap: no second frame within 1/15 s"
-    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, screen, reset")
+    d(ObsPacket(step=1, num_envs=1, state={}, images={"front": frame, "top": frame}))
+    assert d.cam_names == ["front", "top"] and set(d.frames) == {"front", "top"}
+    assert page.got and json.loads(page.got[0]) == {"type": "cams", "names": ["front", "top"]}
+
+    # Orientation follows the controller RELATIVE to how the fingers pointed at grip time.
+    from scipy.spatial.transform import Rotation as R
+    d2 = VrDriver(home=(0.2, 0.0, 0.15), smooth=1.0, track_rot=True)
+    ee0 = R.from_euler("x", 90, degrees=True).as_quat()                    # the sim says: jaws down
+    d2(ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee0]])}, images={}))
+    assert np.allclose(d2(obs)[0, 3:7], ee0), "before any grip: the target is the pose the sim reported, fixed"
+    d2.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d2(obs)
+    q_ctrl = R.from_euler("y", 30, degrees=True).as_quat()                 # turn 30 deg about WebXR up
+    d2.push({"pos": [0, 1, -0.4], "quat": q_ctrl.tolist(), "squeeze": 1, "trigger": 0})
+    got = R.from_quat(d2(obs)[0, 3:7])
+    want = R.from_euler("z", 30, degrees=True) * R.from_quat(ee0)          # = 30 deg about the scene's up
+    assert (got * want.inv()).magnitude() < 1e-6, (got.as_quat(), want.as_quat())
+    # Yaw lock: fingers level and pointing +x, target moved to the left -> they head for it.
+    d3 = VrDriver(home=(0.2, 0.0, 0.15), smooth=1.0, track_rot=True)
+    ee1 = R.from_euler("z", 90, degrees=True).as_quat()                    # -y of the body -> +x
+    d3(ObsPacket(step=0, num_envs=1, state={"ee_pose": np.array([[0.2, 0, 0.15, *ee1]])}, images={}))
+    d3.push({"pos": [0, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0}); d3(obs)
+    d3.push({"pos": [-0.2, 1, -0.4], "quat": [0, 0, 0, 1], "squeeze": 1, "trigger": 0})
+    a3 = d3(obs)[0]
+    assert np.allclose(a3[:3], [0.2, 0.2, 0.15]), a3[:3]
+    f3 = R.from_quat(a3[3:7]).apply([0, -1, 0])
+    assert np.allclose(f3, [np.sqrt(0.5), np.sqrt(0.5), 0.0], atol=1e-6), f3
+    # Hooked: fingers pointing back at the base (-x) stay hooked -- turned 45, not 225 degrees.
+    q_hook = R.from_euler("z", -90, degrees=True).as_quat()                # body -y -> -x
+    f4 = R.from_quat(yaw_lock([0.2, 0.2, 0.15], q_hook)).apply([0, -1, 0])
+    assert np.allclose(f4, [-np.sqrt(0.5), -np.sqrt(0.5), 0.0], atol=1e-6), f4
+    assert np.allclose(yaw_lock([0.3, 0.0, 0.1], q_hook), q_hook), "already in the plane: untouched"
+    print("vr_gripper_server demo OK: frames, clutch edges, jaw, hold, cameras, orientation, yaw lock, reset")
 
 
 if __name__ == "__main__":

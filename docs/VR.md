@@ -16,7 +16,7 @@ writes the YAML and launches both of the above.
 
 | right Touch controller | |
 |---|---|
-| **GRIP** (hold) | move the arm. A clutch, like lifting a mouse: let go, reposition your hand, grip again — the arm stays where it was |
+| **GRIP** (hold) | move the arm — and turn it: the fingers follow the controller's rotation, relative to how they pointed when you gripped. A clutch, like lifting a mouse: let go, reposition your hand, grip again — the arm stays where it was |
 | **TRIGGER** (hold) | close the jaw |
 | **A** | re-centre: the grasp point returns to `--home` |
 | **B** | reset the scene: objects back to their start, arm to its rest pose, target home |
@@ -77,12 +77,16 @@ mapping is one permutation matrix in `webxr_to_sim`, applied to positions direct
 orientations as `P R Pᵀ` — permuting a quaternion's components instead is wrong for exactly the
 reason it looks right. The bridge's `--demo` checks a controller held forward, left and up.
 
-**Orientation.** The bridge sends jaws-down by default, and `--track-rot` follows the
-controller's orientation *relative to where it was when the grip closed*, on top of that — the
-same choice the webcam and Quest-hand drivers make, for the same reason: the controller's rest
-orientation has not been measured on hardware. On the simulator side the shipped config gives
-orientation **zero weight**, so neither reaches the joints; the measurements below say why, and
-what it would take for them to.
+**Orientation follows the controller, relative to the arm.** Each step the simulator puts the
+grasp point's pose in the root frame on the packet (`state["ee_pose"]`). When the grip closes,
+the bridge anchors *both* the controller's orientation and the fingers' actual orientation; from
+then on the target is "however far the controller has turned since, applied to how the fingers
+pointed then". Two things fall out of that. The arm never has to jump to an orientation it may
+not be able to reach — the target starts at zero error and moves only as fast as your wrist.
+And it is what fixed the gripper "rotating by itself": with orientation unweighted, five joints
+against three position constraints left `wrist_roll` free to spin without moving the grasp
+point, and damped least squares let it. The first session showed exactly that. Orientation now
+carries weight 0.3 in the IK, measured below. `--no-track-rot` pins it instead.
 
 **HTTPS.** WebXR refuses to start from a plain `http://` page on anything but `localhost`. The
 bridge generates a self-signed certificate for this PC's LAN address on first run
@@ -139,6 +143,114 @@ The Quest-browser route over the LAN address remains the wireless option and is 
 went to 0.41 m (beyond reach — the arm stalls at its extent) and to 0.05 m (inside the base).
 `--scale 0.6` on the bridge makes hand travel cover the workspace rather than overshoot it.
 
+## Where the arm starts
+
+The task's rest pose puts `gripper_base` at z = 0.06 m, 0.28 m out — which is *inside* a 90 mm
+block placed where the arm reaches the table. The first live session started in collision.
+
+Five start poses were tried before one picked the block up. Each failure was measured rather
+than guessed at, and each measurement changed something that was not the start pose:
+
+| start pose (shoulder, elbow, wrist) | fingers | what happened |
+|---|---|---|
+| 0.3, 0.6, −1.5 | 30° down | descent stalled at 164 mm: this arm cannot hold 30° down below ~0.16 m |
+| 0.3, 0.6, −1.2 | 17° down | stalled at 92 mm, level with the block's top |
+| 0.0, 1.0, −1.2 | 7° down | the arm *rose* to 190 mm before the first grip (the target must be fixed, below) |
+| −0.3, 1.0, −0.6 | 9° up | stalled at 115 mm with the block at x 0.27 or 0.30; the arm gains, below |
+| −0.3, 0.4, +0.6 | 41° up | stalled at 122 mm: the block was under the housing, not between the pads |
+| **−0.3, 1.0, −0.6, block at x = 0.35** | 9° up | **the pads go 60 mm down the block's sides** |
+
+The gripper's collision meshes were then measured in the `gripper_base` frame (the finger
+line is −y, the grasp point is at y = −74.8 mm), and again in the world from the simulator's
+body poses with the fingers open and closed:
+
+| part | along the fingers (y) | across (world y, open → closed) | up/down (z) |
+|---|---|---|---|
+| finger `arm_r` | −78 … +20 mm | −8 … +67 → −52 … +24 mm | ±30 mm |
+| finger `arm_l` | −78 … +20 mm | −68 … +7 → −25 … +52 mm | ±30 mm |
+| gear between them | −83 … −70 mm | ±15 mm | ±15 mm |
+| motor housing | −125 … −63 mm | ±60 mm | −26 … +35 mm |
+
+Three facts fall out. The grasp point is the **palm face**: the pads run 95 mm *forward* of it
+and reach **41 mm below** the finger line; the gear sits 16 mm below the line just ahead of the
+palm; the housing runs 62 mm *behind* the palm and 28 mm below the line. So an object under
+the grasp point is under the housing, and the housing lands on it — 115 mm for a 90 mm block,
+as measured, with the block at x 0.27, 0.30 and even 0.33, where its near top edge still caught
+the housing's far corner. The fingers are open at joint 0 and closed at −0.044: pads 134 mm
+apart open, 49 mm closed, level at `wrist_roll` 0 (±0.35 rad tilts them 20 mm apart in
+height; the body *origins* sit at different heights, which misled one attempt).
+
+The shipped scene follows from the numbers: grasp point (0.273, 0, 0.130) at the start
+(shoulder −0.3, elbow 1.0, wrist −0.6, finger tips 9° up), the block centred at **x = 0.35**,
+under the pads (x 0.27–0.37) and 27 mm forward of the housing (which ends at 0.288). From
+there the descent is the arm's own floor — the same tilt is reachable down to (0.269, 0.036)
+in the grid and was measured to 68 mm with the scene empty — which puts the pads 60 mm down
+the block's sides. The bridge's default `--home` is the start point, so the first grip does
+not jump, and B (reset) returns the arm there.
+
+**The final mock run, fake controller:** reach down to 68 mm (1.7 mm off), close at 69 mm, lift the block to 121 mm, carry it 100 mm left at 121 mm and lower it onto the tray. Tracking error over the 840 steps after the first request **2.2 mm mean, 3.1 mm max**; orientation error **1.2° mean, 2.9° max**; object peak height 121 mm from a 45 mm rest — **CARRIED**.
+
+**The finger colliders were convex hulls, and that is what every block was hitting.** With the
+housing and gear cleared, the block at x = 0.35 was still met at 107 mm — and the finger
+joints then closed to −0.040, nearly their full travel, straight through where the block's
+sides were. Each finger is an L: a pad plus a rack bar running across the gripper to the
+central gear, and the asset approximated each as a single convex hull, a wedge whose
+underside slopes from the pad's bottom up to the rack and whose inner face is not the pad.
+The block's top edge met that slope; the pads had nothing to close with. Moving the block to
+x = 0.40, beyond the pads, let the arm descend freely to 68 mm, which located the contact on
+the fingers themselves. The two finger colliders in
+`robot_description/IsaacAssets/SO-ARM101-FULL/payloads/instances.usda` are now
+`convexDecomposition`; the arm's floor beside the block went from 107 mm to its own 68 mm,
+and the pads close on the block's sides.
+
+**The orientation target must be fixed, not followed.** An early version asked, before the
+first grip, for whatever orientation the arm currently had. That leaves the orientation
+unconstrained, and three position constraints on five weakly-driven joints leave a null space
+that gravity walks the arm through: the wrist went from −1.2 to +0.6 rad in 90 steps with the
+grasp point never moving, and the arm settled 6 cm higher in a posture it then anchored on.
+That is the "gripper turns by itself" of the first sessions, reproduced in the mock. The bridge
+now takes the orientation target once, from the first pose the simulator reports (and again
+after a B reset), and only the controller's own rotation changes it.
+
+**The arm servos were too soft to close the last 45 mm.** The asset's arm gains are 17.8 N·m/rad
+and 0.6 N·m·s/rad. Holding a target 70 mm above the table at reach, the shoulder sat 0.10–0.12
+rad short of the IK's joint target on 1.8–2.2 N·m — the torque it takes to hold the arm's own
+weight there — and since the task-space IK steps from the *current* pose each time, that gap
+never closes: a commanded 70 mm stopped at 118 mm, on CPU and GPU physics alike. The config's
+`scene.robot.arm` block sets **200 / 5**; the remaining gap is 0.01 rad, about 3 mm, and the
+STS3215 in the real arm is a stiff position servo, so this is nearer the hardware, not further.
+
+**The object spawns where the YAML says.** The task re-places it at every reset, ±3 cm in x and
+±6 cm in y — right for training, wrong for an operator, and it made the mock's failures
+unrepeatable (the block under the housing in one run, clear of it in the next).
+`scene.spawn_jitter: false` pins it; the GUI has the checkbox.
+
+## Every session is logged
+
+`logs/vr/<timestamp>-bridge.jsonl` (the bridge) and `logs/vr/<timestamp>-sim.jsonl` (`run.py`,
+whenever the driver is remote) — one JSON object per request / per step:
+
+```
+bridge:  t, step, engaged, squeeze, trigger, recentre, reset, ctrl_pos, ctrl_quat, ee_quat, action
+sim:     t, step, reset, action, ee_pose (root frame, xyz + xyzw), joint_pos
+```
+
+Join them on `step`. The first session's complaint — "the gripper rotates by itself" — could
+not be answered from what was logged then (every 300th message, position only); this is what
+answers the next one. `--no-log` on either side turns it off; `--log DIR` moves it.
+
+## More than one screen, streamed off the action thread
+
+Three cameras in the config — `a_front` large, `b_top` and `c_side` smaller, turned 28° to face
+you — each a floating panel; the page lays them out by the camera list the bridge announces, so
+adding a fourth is a config line. Names sort alphabetically, hence the prefixes.
+
+Speed came from three changes, in order of effect: the frames are encoded and sent on their
+**own thread** with a "latest frame" slot, so the reply the simulator is waiting on is never
+delayed by a JPEG or a slow page; the simulator attaches frames every **second** step instead of
+every third; and the cap went from 15 to **30 fps** at JPEG quality 60. Binary frames carry a one-
+byte camera index ahead of the JPEG.
+
 ## Measured: does the arm follow?
 
 The fake controller reaches down, grips, lifts, carries 160 mm left and releases, over 12 s.
@@ -194,6 +306,36 @@ reach, the descent stopping at z ≈ 63 mm — the arm's floor at that distance.
 task's 30 mm cube can never be gripped by them, and was not. The shipped config uses a
 70 × 70 × 90 mm, 50 g block: wide enough to be closed on, tall enough to be met at 60 mm.
 
+**With orientation following the controller** — relative to the arm, the fake controller
+turning its wrist 40° during the carry, error between the commanded and actual grasp frame:
+
+| `ik_orientation_weight` | orientation error (mean / p95) | position error (mean / p95) |
+|---|---|---|
+| 0.0 | not tracked; `wrist_roll` drifts | 4–20 mm |
+| **0.1** | **17° / 17°** | **22 mm / 49 mm** |
+| 0.2 | 24° / 25° | 60 mm / 61 mm |
+| 0.3 | 16° / 20° | 59 mm / 77 mm |
+
+0.1 is shipped: the fingers follow the wrist to within about 17° for a 22 mm cost in position,
+and the self-rotation is gone. Above that the solver gives up twice the position for no more
+orientation. The residual 17° is the arm, not the solver — five joints meet a commanded
+orientation only approximately, and the anchor keeps that approximation from ever having to
+be large.
+
+**The heading is the arm's, so the bridge stops asking for it.** Five joints are base yaw,
+three pitches in one vertical plane, and wrist roll. The fingers' heading *is* the base yaw,
+and the base yaw is wherever the arm is reaching — so a commanded heading other than
+`atan2(y, x)` of the target is unreachable, and the solver was paying position for it: at the
+tray (y = 0.10) the grasp point sat 37 mm off with the fingers 6° from a heading the arm could
+never take. `yaw_lock()` in the bridge now turns the commanded orientation about the world's
+up until the finger axis lies in the arm's plane through the commanded point — pointing either
+way along it, by the smaller turn, since at the start pose the fingers point back at the base
+(the first version turned them a half circle and the arm contorted trying to follow). Pitch and
+roll — the parts five joints can follow — are kept, and it is skipped within ~11° of straight
+down, where a heading is noise.
+It costs nothing the arm could have done, and it is what a person's wrist does anyway: you
+turn toward what you are reaching for.
+
 **The final run, fake controller, block:**
 
 ```
@@ -214,6 +356,51 @@ not a claim that every pick succeeds.
 *bridge* started, ~25 s before the simulator's first request, so the whole 12 s script had
 played out to nobody and the clutch anchored on the final static pose. The command never moved
 and the arm sat still for 900 steps. It now starts on the first request.
+
+## Making it fast: where a step goes
+
+The target is 50 steps/s — the environment steps at 50 Hz (`dt` 0.01, decimation 2), so that
+is real time. The first live sessions ran at 16–18. RTX settings and lights were tried first
+(a "cheap" render block: 1 sample per pixel, no bounces, reflections, GI, AO, translucency or
+denoiser; a distant light instead of the dome) and changed nothing: 17–19 either way. So one
+step was profiled phase by phase instead, one boot, 100–150 repetitions each
+(RTX 4070 Ti, three tiled cameras, headless unless said):
+
+| phase | GPU physics (`cuda:0`) | CPU physics |
+|---|---|---|
+| one PhysX substep | 5.3 ms | **0.6 ms** |
+| IK action term, `apply_action` (runs per substep) | 3.9 ms | 1.4 ms |
+| `write_data_to_sim` | 1.7 ms | – |
+| rewards + observations + terminations | 2.0 ms | – |
+| **`env.step`, no camera read** | **31 ms (32/s)** | **8.1 ms (123/s)** |
+| one camera render + readback (all three cameras) | 26 ms | 26 ms |
+| `env.step` + cameras at 30 fps (a render every 2nd step) | 43 ms (23/s) | **20 ms (50/s)** |
+| `env.step` + cameras at 15 fps | 38 ms (26/s) | **14 ms (70/s)** |
+| packet build + msgpack, 1 MB of frames | 0.15 ms | – |
+| ZeroMQ round trip, 1 MB | 0.9 ms | – |
+| the Kit viewer window, per step on top of everything | +25 ms | +25 ms |
+
+Three findings, in order of size:
+
+1. **One arm on GPU PhysX is all launch overhead.** A substep is 5.3 ms on the GPU and 0.6 ms
+   on the CPU, and the IK term — which fetches the Jacobian every substep — halves too. The
+   config now sets `sim.device: cpu`; the step went from 31 ms to 8. Rendering stays on the GPU
+   regardless; Newton backends need `cuda`, this is PhysX.
+2. **A camera render is 26 ms whatever you turn off.** The RTX toggles above, `--kit_args`
+   with DLSS off, AA off, sampled lighting off and `waitIdle` false: all within 1 ms of each
+   other. It is the render *pipeline* per frame, not the shading, so the only lever is how
+   often it runs: `update_period` on each camera. 30 fps costs 13 ms a step averaged, 15 fps
+   costs 6.5. The transport was never the problem — a megabyte of frames is a millisecond.
+   Fewer cameras help some (one instead of three: a render of ~15 ms instead of ~24) and
+   halving every resolution helps little (~3 ms), so the three screens stay and the rate is
+   the dial.
+3. **The viewer window is a second render.** 25 ms per step, every step. The GUI now starts
+   the simulator without it (a checkbox brings it back); the VR screens do not need it.
+
+**Live, bridge running and the page connected** (the bridge JPEG-encodes three streams on the
+same CPU the physics now runs on): cameras at 30 fps gave **43–45 steps/s**; at 20 fps
+(`update_period: 0.05`, the shipped value) **55–60 steps/s**. The environment steps at 50 Hz,
+so that is real time with a margin; the headset sees each camera at 20 fps.
 
 ## The scene GUI
 

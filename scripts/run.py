@@ -22,6 +22,10 @@ parser.add_argument("--set", action="append", default=[], metavar="a.b=c",
 parser.add_argument("--steps", type=int, default=500, help="env steps to run; 0 = until closed")
 parser.add_argument("--num_envs", type=int, default=None, help="override scene.num_envs")
 parser.add_argument("--describe", action="store_true", help="print the resolved config and exit")
+parser.add_argument("--log", default="logs/vr",
+                    help="directory for a per-session JSONL of every step (action, grasp pose, joints); "
+                         "written whenever the driver is remote, since that is a session worth keeping")
+parser.add_argument("--no-log", action="store_true")
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -119,24 +123,50 @@ def main() -> None:
     obs, _ = env.reset()
     source.reset()
     step = 0
-    # Declared cameras ride the packet too, every third step. The observation manager does not
+    # Declared cameras ride the packet too, every second step. The observation manager does not
     # know about scene cameras unless a term names them; reading the sensor directly is five
-    # lines where an observation group would be a new config surface. Every third step because
-    # a 480x360 frame is half a megabyte of msgpack and 15 Hz is plenty for a screen.
+    # lines where an observation group would be a new config surface.
     cams = list(((cfg.get("scene") or {}).get("cameras") or {}).keys())
+    # So does the grasp point's pose, in the root frame: a teleop bridge anchors the operator's
+    # orientation to where the fingers actually point, which only the simulator knows.
+    ee = env.scene["ee_frame"] if "ee_frame" in env.scene.keys() else None
+    robot = env.scene["robot"]
+    from isaaclab.utils.math import subtract_frame_transforms
+
+    log = None
+    if not args_cli.no_log and (cfg.get("control") or {}).get("source") == "zmq":
+        import json
+        import time
+        from pathlib import Path
+
+        log_dir = Path(args_cli.log)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{time.strftime('%Y%m%d-%H%M%S')}-sim.jsonl"
+        log = open(log_path, "w", encoding="utf-8")
+        print(f"[run] session log: {log_path}")
+    t0 = __import__("time").time()
+    rate_t0 = t0
+
     try:
         while simulation_app.is_running():
             if args_cli.steps and step >= args_cli.steps:
                 print(f"[run] completed {step} steps")
                 break
             packet = to_packet(step, obs, env.num_envs)
-            if cams and step % 3 == 0:
+            if cams and step % 2 == 0:
                 for name in cams:
                     rgb = env.scene[name].data.output.get("rgb")
                     if rgb is not None:
                         packet.images[name] = rgb[:1, ..., :3].detach().cpu().numpy()
+            if ee is not None:
+                p_b, q_b = subtract_frame_transforms(
+                    robot.data.root_pos_w.torch, robot.data.root_quat_w.torch,
+                    ee.data.target_pos_w.torch[:, 0], ee.data.target_quat_w.torch[:, 0],
+                )
+                packet.state["ee_pose"] = torch.cat([p_b, q_b], dim=-1).detach().cpu().numpy()
             action = source.advance(packet)
-            if getattr(source, "last_reset", None) is not None:
+            was_reset = getattr(source, "last_reset", None) is not None
+            if was_reset:
                 # The operator asked for a fresh scene (B on the VR controller). Whole-env reset:
                 # the task's per-env reset needs ids the socket does not carry, and one env is
                 # the teleop case anyway.
@@ -144,16 +174,30 @@ def main() -> None:
                 obs, _ = env.reset()
                 source.reset()
                 print(f"[run] scene reset at step {step} (operator)", flush=True)
+            else:
+                obs, _, terminated, truncated, _ = env.step(
+                    torch.as_tensor(action, device=env.device, dtype=torch.float32)
+                )
+            if log is not None:
+                rec = {"t": round(__import__("time").time() - t0, 4), "step": step, "reset": was_reset,
+                       "action": np.asarray(action)[0].round(5).tolist(),
+                       "joint_pos": robot.data.joint_pos.torch[0].detach().cpu().numpy().round(5).tolist()}
+                if "ee_pose" in packet.state:
+                    rec["ee_pose"] = np.asarray(packet.state["ee_pose"])[0].round(5).tolist()
+                log.write(json.dumps(rec) + chr(10))
+            if was_reset:
+                step += 1
                 continue
-            obs, _, terminated, truncated, _ = env.step(
-                torch.as_tensor(action, device=env.device, dtype=torch.float32)
-            )
             if bool(torch.any(terminated | truncated)):
                 source.reset()
             step += 1
             if step % 100 == 0:
-                print(f"[run] step {step}", flush=True)
+                now = __import__("time").time()
+                rate = 100.0 / max(1e-9, now - rate_t0); rate_t0 = now
+                print(f"[run] step {step}  {rate:5.1f} steps/s", flush=True)
     finally:
+        if log is not None:
+            log.close()
         source.close()
         env.close()
 

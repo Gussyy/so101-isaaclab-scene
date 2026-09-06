@@ -187,6 +187,7 @@ SO101_FULL_CLOSE = {j: -0.044 for j in SO101_FULL_FINGERS}
 def so101_full_cfg(
     prim_path: str = "{ENV_REGEX_NS}/Robot",
     gripper: dict | None = None,
+    arm: dict | None = None,
 ) -> ArticulationCfg:
     """SO-ARM101-FULL: the 5-DOF arm with the parallel gripper.
 
@@ -199,8 +200,14 @@ def so101_full_cfg(
         gripper: Optional overrides from ``scene.robot.gripper`` in a config -- ``stiffness``,
             ``damping``, ``effort``, ``velocity``. Units are N/m and N for the prismatic
             fingers, not N.m/rad, so the arm's own gains would be limp here.
+        arm: Optional overrides from ``scene.robot.arm`` -- ``stiffness`` (N.m/rad), ``damping``
+            (N.m.s/rad), ``effort`` (N.m). The asset's 17.8 / 0.6 holds a tenth of a radian of
+            error against gravity at reach, which is 45 mm at the fingers, and a task-space IK
+            that steps from the current pose never closes it (docs/VR.md). The teleop config
+            sets 200 / 5 for that reason; the defaults here are the asset's, unchanged.
     """
     g = dict(gripper or {})
+    ar = dict(arm or {})
     from isaaclab.actuators import ImplicitActuatorCfg
     import isaaclab.sim as sim_utils
 
@@ -217,7 +224,8 @@ def so101_full_cfg(
             # Same gains as the single-jaw arm: identical joints, identical limits.
             "arm": ImplicitActuatorCfg(
                 joint_names_expr=SO101_FULL_ARM_JOINTS,
-                effort_limit_sim=10.0, velocity_limit_sim=10.0, stiffness=17.8, damping=0.60,
+                effort_limit_sim=float(ar.get("effort", 10.0)), velocity_limit_sim=10.0,
+                stiffness=float(ar.get("stiffness", 17.8)), damping=float(ar.get("damping", 0.60)),
             ),
             # Prismatic: stiffness is N/m here, not N.m/rad, so the arm's 17.8 would be limp.
             "fingers": ImplicitActuatorCfg(

@@ -43,17 +43,27 @@ ROBOT_ROT = {
     "so101": [0.0, 0.0, 0.70710678, 0.70710678],
     "so101_full": [0.0, 0.0, 0.0, 1.0],
 }
+# Arm servo gains written alongside the pose: the asset's 17.8 N.m/rad sags 45 mm at reach
+# and the IK cannot close it (configs/vr_teleop.yaml). Only the parallel-gripper arm takes them.
+ROBOT_ARM = {"so101_full": {"stiffness": 200.0, "damping": 5.0}}
 ROBOT_JOINTS = {
     "so101": {"shoulder_pan": 0.0, "shoulder_lift": -0.6, "elbow_flex": 0.8, "wrist_flex": 0.6,
               "wrist_roll": 0.0, "gripper": 0.0},
-    "so101_full": {"shoulder_pan": 0.0, "shoulder_lift": -0.6, "elbow_flex": 0.8, "wrist_flex": 0.6,
+    # Over the block, finger tips 9 degrees up -- the task's rest pose starts inside the object.
+    "so101_full": {"shoulder_pan": 0.0, "shoulder_lift": -0.3, "elbow_flex": 1.0, "wrist_flex": -0.6,
                    "wrist_roll": 0.0},
 }
 PHYSICS = ["physx", "newton_mjwarp", "newton_vbd"]
 # Object types that take a `name:` from a catalogue, and their default names.
 NAMED = {"ycb": "gelatin_box", "lehome": "burger_patty"}
-DEMO_CAM = {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/DemoCam", "resolution": [640, 480],
-            "pos": [0.50, -0.36, 0.34], "look_at": [0.20, 0.0, 0.05], "focal_length": 20.0}
+VR_CAMS = {
+    "a_front": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/FrontCam", "resolution": [480, 360],
+                "pos": [0.62, -0.30, 0.38], "look_at": [0.24, 0.02, 0.06], "focal_length": 18.0, "update_period": 0.05},
+    "b_top": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/TopCam", "resolution": [320, 240],
+              "pos": [0.32, 0.0, 0.65], "look_at": [0.32, 0.0, 0.0], "up": [1.0, 0.0, 0.0], "focal_length": 16.0, "update_period": 0.05},
+    "c_side": {"type": "tiled", "prim_path": "{ENV_REGEX_NS}/SideCam", "resolution": [320, 240],
+               "pos": [0.32, 0.55, 0.20], "look_at": [0.32, 0.0, 0.06], "focal_length": 18.0, "update_period": 0.05},
+}
 
 
 class ObjectRow:
@@ -137,18 +147,22 @@ class SceneGui:
         self.ik = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="pose target (IK)  -- for VR / hand teleop", variable=self.ik).grid(row=5, column=2, columnspan=2, sticky="w", **pad)
         self.camera = tk.BooleanVar(value=False)
-        ttk.Checkbutton(f, text="demo camera (slow on Newton -- see docs/PHYSICS.md)", variable=self.camera).grid(row=6, column=0, columnspan=3, sticky="w", **pad)
+        ttk.Checkbutton(f, text="VR screens: front, top, side cameras (slow on Newton -- docs/PHYSICS.md)", variable=self.camera).grid(row=6, column=0, columnspan=3, sticky="w", **pad)
         self.vr = tk.BooleanVar(value=True)
         ttk.Checkbutton(f, text="also start the VR bridge (scripts/vr_gripper_server.py)", variable=self.vr).grid(row=7, column=0, columnspan=3, sticky="w", **pad)
+        self.jitter = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="re-place objects at random on every reset (training; off = exactly where placed)", variable=self.jitter).grid(row=8, column=0, columnspan=4, sticky="w", **pad)
+        self.viewer = tk.BooleanVar(value=False)
+        ttk.Checkbutton(f, text="show the Kit viewer window (costs a quarter of the step rate; the VR screens do not need it)", variable=self.viewer).grid(row=9, column=0, columnspan=4, sticky="w", **pad)
 
         # -- buttons ------------------------------------------------------------------
         b = ttk.Frame(f)
-        b.grid(row=8, column=0, columnspan=4, sticky="w", pady=(10, 0))
+        b.grid(row=10, column=0, columnspan=4, sticky="w", pady=(10, 0))
         ttk.Button(b, text="Load...", command=self.load_dialog).grid(row=0, column=0, padx=4)
         ttk.Button(b, text="Save as...", command=self.save_dialog).grid(row=0, column=1, padx=4)
         ttk.Button(b, text="Start", command=self.start).grid(row=0, column=2, padx=16)
         self.status = ttk.Label(f, text=f"writes {OUT.relative_to(REPO)} then runs scripts/run.py")
-        self.status.grid(row=9, column=0, columnspan=4, sticky="w", **pad)
+        self.status.grid(row=11, column=0, columnspan=4, sticky="w", **pad)
 
         if initial:
             self.load(initial)
@@ -180,14 +194,18 @@ class SceneGui:
             "scene": {
                 "num_envs": int(self.num_envs.get()),
                 "env_spacing": 1.0,
-                "robot": {"type": robot, "rot": ROBOT_ROT[robot], "joint_pos": ROBOT_JOINTS[robot]},
+                "spawn_jitter": bool(self.jitter.get()),
+                "robot": {"type": robot, "rot": ROBOT_ROT[robot], "joint_pos": ROBOT_JOINTS[robot],
+                          **({"arm": ROBOT_ARM[robot]} if robot in ROBOT_ARM else {})},
                 "objects": objects,
             },
-            "sim": {"episode_length_s": float(self.episode.get()), "physics": self.physics.get()},
+            # One env on PhysX steps 4x faster on the CPU (docs/VR.md); Newton needs cuda.
+            "sim": {"episode_length_s": float(self.episode.get()), "physics": self.physics.get(),
+                    "device": "cpu" if self.physics.get() == "physx" else "cuda:0"},
             "control": {"source": self.source.get(), "action_horizon": 1},
         }
         if self.camera.get():
-            cfg["scene"]["cameras"] = {"demo_cam": dict(DEMO_CAM)}
+            cfg["scene"]["cameras"] = {k: dict(v) for k, v in VR_CAMS.items()}
         if self.ik.get():
             cfg["control"]["actions"] = "ik"
         if self.source.get() == "zmq":
@@ -200,6 +218,7 @@ class SceneGui:
         self.robot.set((scene.get("robot") or {}).get("type", "so101_full"))
         self.physics.set(sim.get("physics", "physx"))
         self.num_envs.set(str(scene.get("num_envs", 1)))
+        self.jitter.set(bool(scene.get("spawn_jitter", True)))
         self.episode.set(str(sim.get("episode_length_s", 600)))
         self.source.set(ctl.get("source", "zero"))
         self.ik.set(ctl.get("actions") == "ik")
@@ -237,8 +256,10 @@ class SceneGui:
             return
         flags = subprocess.CREATE_NEW_CONSOLE if sys.platform == "win32" else 0
         if self.vr.get() and self.source.get() == "zmq":
-            subprocess.Popen([PY, str(REPO / "scripts/vr_gripper_server.py")], cwd=REPO, creationflags=flags)
-        cmd = [PY, str(REPO / "scripts/run.py"), "--config", str(OUT), "--viz", "kit", "--steps", "0"]
+            subprocess.Popen([PY, str(REPO / "scripts/vr_gripper_server.py"), "--no-tls"], cwd=REPO, creationflags=flags)
+        cmd = [PY, str(REPO / "scripts/run.py"), "--config", str(OUT), "--steps", "0"]
+        if self.viewer.get():
+            cmd += ["--viz", "kit"]
         subprocess.Popen(cmd, cwd=REPO, creationflags=flags)
         self.status.configure(text="started: " + " ".join(cmd[1:]))
 
@@ -262,6 +283,8 @@ def demo() -> None:
     assert cfg["scene"]["objects"]["tray"]["type"] == "static_cuboid"   # static-ness is the type here
     src = yaml.safe_load((REPO / "configs" / "vr_teleop.yaml").read_text(encoding="utf-8"))
     assert cfg["scene"]["objects"]["object"]["size"] == src["scene"]["objects"]["object"]["size"], "extra keys must survive"
+    assert cfg["scene"]["robot"]["arm"] == src["scene"]["robot"]["arm"], "the arm gains the config measured"
+    assert cfg["scene"]["spawn_jitter"] is False, "teleop config: objects spawn where placed"
     from simbridge.builder import load_config  # the builder must accept what the form writes
     tmp = REPO / "configs" / "gui_scene.yaml"
     gui.write(tmp)

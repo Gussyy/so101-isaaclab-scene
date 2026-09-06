@@ -61,6 +61,7 @@ def _so101_full(spec: dict[str, Any]) -> ArticulationCfg:
     cfg = so101_full_cfg(
         spec.get("prim_path", "{ENV_REGEX_NS}/Robot"),
         gripper=spec.get("gripper"),
+        arm=spec.get("arm"),
     )
     cfg.init_state = ArticulationCfg.InitialStateCfg(
         pos=_pos(spec),
@@ -661,6 +662,9 @@ def _tiled(spec: dict[str, Any]) -> TiledCameraCfg:
         ),
         width=int(res[0]),
         height=int(res[1]),
+        # Render at the rate the consumer needs, not at the physics rate. A teleop screen wants
+        # ~30 fps; the env steps at 50 Hz and physics at 100. 0 (the default) renders every step.
+        update_period=float(spec.get("update_period", 0.0)),
     )
     return cfg
 

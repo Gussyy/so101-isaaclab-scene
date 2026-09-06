@@ -4,39 +4,49 @@
 <title>SO-101 VR bridge</title>
 <style>
   body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: #14161a; color: #e8e8e8; }
-  main { max-width: 680px; margin: 0 auto; padding: 24px; }
+  main { max-width: 900px; margin: 0 auto; padding: 24px; }
   h1 { font-size: 20px; margin: 0 0 12px; }
   button { font: inherit; padding: 14px 20px; border: 0; border-radius: 8px; margin: 6px 8px 6px 0;
            background: #3b6ef5; color: white; cursor: pointer; }
   #status { margin-top: 12px; padding: 12px; background: #1f2229; border-radius: 8px;
             white-space: pre; font-family: ui-monospace, monospace; font-size: 14px; }
-  #view { margin-top: 12px; width: 100%; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; }
+  #views { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  #views canvas { flex: 1 1 260px; aspect-ratio: 4 / 3; background: #000; border-radius: 8px; min-width: 200px; }
   #pad { margin-top: 12px; width: 100%; height: 200px; background: #22262e; border-radius: 8px;
          touch-action: none; display: none; }
   small { color: #9aa; }
 </style>
 <main>
   <h1>SO-101 VR bridge</h1>
-  <p>Right controller: <b>GRIP</b> hold = move the arm &middot; <b>TRIGGER</b> = close jaw &middot;
-     <b>A</b> = re-centre &middot; <b>B</b> = reset the scene. In the headset the simulator's camera floats in front of you.</p>
+  <p>Right controller: <b>GRIP</b> hold = move the arm (and turn it) &middot; <b>TRIGGER</b> = close jaw &middot;
+     <b>A</b> = re-centre &middot; <b>B</b> = reset the scene. In the headset the simulator's cameras float in front of you.</p>
   <button id="vr">Enter VR</button>
   <button id="mouse">Mouse test (no headset)</button>
   <div id="status">not connected</div>
-  <canvas id="view" width="480" height="360"></canvas>
+  <div id="views"></div>
   <canvas id="pad"></canvas>
   <p><small>Mouse test: drag = forward/left, wheel = up/down, hold <b>Space</b> = grip, <b>C</b> = jaw, <b>R</b> = re-centre, <b>B</b> = reset.
-  The picture above is the simulator's camera, live, whether or not you are in VR.</small></p>
+  The pictures above are the simulator's cameras, live, whether or not you are in VR.</small></p>
 </main>
 <script>
 // ------------------------------------------------------------------ socket, both directions
-//   up:   {pos:[x,y,z], quat:[x,y,z,w], squeeze:0..1, trigger:0..1, recentre:bool}  (WebXR local-floor)
-//   down: binary JPEG frames of the simulator's camera
-const status = document.getElementById('status');
-const view = document.getElementById('view'), view2d = view.getContext('2d');
+//   up:   {pos:[x,y,z], quat:[x,y,z,w], squeeze, trigger, recentre, reset}   (WebXR local-floor)
+//   down: text {type:"cams", names:[...]} once per camera set, then binary [index byte][JPEG]
+const status = document.getElementById('status'), views = document.getElementById('views');
 let ws = null, sent = 0, frames = 0, lastSend = 0, lastMsg = null, lines = [];
-let latestBitmap = null, textureDirty = false;
+let cams = [];                     // camera names, in index order
+const latest = [];                 // per camera: {bitmap, dirty, canvas}
 const SEND_HZ = 60;
 
+function setCams(names) {
+  cams = names; views.innerHTML = ''; latest.length = 0;
+  for (const n of names) {
+    const c = document.createElement('canvas'); c.width = 480; c.height = 360; c.title = n;
+    views.appendChild(c);
+    latest.push({ bitmap: null, dirty: false, canvas: c, ctx: c.getContext('2d') });
+  }
+  log('cameras: ' + names.join(', '));
+}
 function connect() {
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${scheme}://${location.host}/ws`);
@@ -45,11 +55,18 @@ function connect() {
   ws.onclose = () => { log('disconnected, retrying'); setTimeout(connect, 1000); };
   ws.onerror = () => {};
   ws.onmessage = async (ev) => {
+    if (typeof ev.data === 'string') {
+      try { const m = JSON.parse(ev.data); if (m.type === 'cams') setCams(m.names); } catch (e) {}
+      return;
+    }
     if (!(ev.data instanceof Blob)) return;
     try {
-      const bmp = await createImageBitmap(ev.data);
-      latestBitmap = bmp; textureDirty = true; frames++;
-      view2d.drawImage(bmp, 0, 0, view.width, view.height);   // the 2D preview, always
+      const idx = new Uint8Array(await ev.data.slice(0, 1).arrayBuffer())[0];
+      if (!latest[idx]) return;
+      const bmp = await createImageBitmap(ev.data.slice(1));
+      const slot = latest[idx];
+      slot.bitmap = bmp; slot.dirty = true; frames++;
+      slot.ctx.drawImage(bmp, 0, 0, slot.canvas.width, slot.canvas.height);
     } catch (e) { /* a torn frame; the next one replaces it */ }
   };
 }
@@ -62,57 +79,68 @@ function send(msg) {
 function log(s) { lines = [s, ...lines].slice(0, 4); render(); }
 const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
 function render() {
-  const m = lastMsg ? `pos ${m3(lastMsg.pos)}  grip ${lastMsg.squeeze.toFixed(1)}  trig ${lastMsg.trigger.toFixed(1)}` : '';
+  const m = lastMsg ? `pos ${m3(lastMsg.pos)}  quat ${m3(lastMsg.quat)}  grip ${lastMsg.squeeze.toFixed(1)}  trig ${lastMsg.trigger.toFixed(1)}` : '';
   status.textContent = `${lines.join('\n')}\nsent ${sent}   frames ${frames}\n${m}`;
 }
 connect();
 
-// ------------------------------------------------------------------ a screen in WebGL
-// One textured quad. Plain WebGL because it is thirty lines and needs no library.
+// ------------------------------------------------------------------ screens in WebGL
 const VS = `attribute vec2 p; attribute vec2 t; uniform mat4 mvp; varying vec2 v;
             void main(){ v = t; gl_Position = mvp * vec4(p, 0.0, 1.0); }`;
 const FS = `precision mediump float; uniform sampler2D img; varying vec2 v;
             void main(){ gl_FragColor = texture2D(img, v); }`;
-function makeScreen(gl) {
+function makeScreens(gl) {
   const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s); return s; };
   const prog = gl.createProgram();
   gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS));
   gl.linkProgram(prog);
-  // 1.2 m wide, 0.9 m tall (the camera is 4:3), centred on the origin; the model matrix places it.
-  const W = 0.6, H = 0.45;
-  const data = new Float32Array([-W,-H, 0,1,   W,-H, 1,1,   -W,H, 0,0,   W,H, 1,0]);
-  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
-  const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 2, 2, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(12).fill(40));
-  const aP = gl.getAttribLocation(prog, 'p'), aT = gl.getAttribLocation(prog, 't');
-  const uM = gl.getUniformLocation(prog, 'mvp');
-  return { draw(mvp) {
+  const unit = new Float32Array([-1,-0.75, 0,1,   1,-0.75, 1,1,   -1,0.75, 0,0,   1,0.75, 1,0]);   // 4:3, half-size 1
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf); gl.bufferData(gl.ARRAY_BUFFER, unit, gl.STATIC_DRAW);
+  const aP = gl.getAttribLocation(prog, 'p'), aT = gl.getAttribLocation(prog, 't'), uM = gl.getUniformLocation(prog, 'mvp');
+  const textures = [];
+  function texFor(i) {
+    if (textures[i]) return textures[i];
+    const tex = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 2, 2, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array(12).fill(40));
+    return (textures[i] = tex);
+  }
+  return { draw(viewProj) {
     gl.useProgram(prog);
-    if (textureDirty && latestBitmap) {
-      gl.bindTexture(gl.TEXTURE_2D, tex);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, latestBitmap);
-      textureDirty = false;
-    }
-    gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.enableVertexAttribArray(aP); gl.vertexAttribPointer(aP, 2, gl.FLOAT, false, 16, 0);
     gl.enableVertexAttribArray(aT); gl.vertexAttribPointer(aT, 2, gl.FLOAT, false, 16, 8);
-    gl.uniformMatrix4fv(uM, false, mvp);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    for (let i = 0; i < Math.max(1, latest.length); i++) {
+      const tex = texFor(i);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      const slot = latest[i];
+      if (slot && slot.dirty && slot.bitmap) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, slot.bitmap); slot.dirty = false;
+      }
+      gl.uniformMatrix4fv(uM, false, mul4(viewProj, placement(i)));
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
   } };
 }
-// Column-major 4x4 helpers, enough for projection * view * model.
+// Column-major 4x4: projection * view * model.
 function mul4(a, b) {
   const o = new Float32Array(16);
   for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++)
     o[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1] + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
   return o;
 }
-// The screen: 1.5 m in front of where you stood when the session began, at chest height.
-const MODEL = new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,1.3,-1.5,1]);
+// Screen i: the first is 1.2 m wide, 1.5 m ahead at chest height; the rest are 0.7 m wide,
+// to the sides, turned 28 degrees to face the operator. Everything is in local-floor metres.
+function placement(i) {
+  const scale = i === 0 ? 0.6 : 0.35;
+  const side = i === 0 ? 0 : (i % 2 === 1 ? -1 : 1) * (1 + Math.floor((i - 1) / 2) * 0.75);
+  const x = side, z = i === 0 ? -1.5 : -1.35, y = 1.3;
+  const a = -side * 0.49;                                        // yaw toward the centre
+  const c = Math.cos(a), s = Math.sin(a);
+  return new Float32Array([c*scale,0,-s*scale,0,  0,scale,0,0,  s*scale,0,c*scale,0,  x,y,z,1]);
+}
 
 // ------------------------------------------------------------------ WebXR
 async function enterVR() {
@@ -129,7 +157,7 @@ async function enterVR() {
   const gl = canvas.getContext('webgl', { xrCompatible: true });
   session.updateRenderState({ baseLayer: new XRWebGLLayer(session, gl) });
   const ref = await session.requestReferenceSpace('local-floor');
-  const screen = makeScreen(gl);
+  const screens = makeScreens(gl);
   session.addEventListener('end', () => log('XR session ended'));
 
   session.requestAnimationFrame(function onFrame(t, frame) {
@@ -143,7 +171,7 @@ async function enterVR() {
       for (const v of pose.views) {
         const vp = layer.getViewport(v);
         gl.viewport(vp.x, vp.y, vp.width, vp.height);
-        screen.draw(mul4(v.projectionMatrix, mul4(v.transform.inverse.matrix, MODEL)));
+        screens.draw(mul4(v.projectionMatrix, v.transform.inverse.matrix));
       }
     }
     for (const src of session.inputSources) {

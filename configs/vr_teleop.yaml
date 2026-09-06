@@ -3,8 +3,9 @@
 #   # terminal 1 -- the bridge (serves the WebXR page and turns controller poses into actions)
 #   python scripts/vr_gripper_server.py
 #
-#   # terminal 2 -- the simulator, watching the monitor
-#   python scripts/run.py --config configs/vr_teleop.yaml --viz kit --steps 0
+#   # terminal 2 -- the simulator. No window: the headset has the screens, and the Kit viewer
+#   # costs 25 ms a step (docs/VR.md). Add --viz kit to watch on the monitor anyway.
+#   python scripts/run.py --config configs/vr_teleop.yaml --steps 0
 #
 #   # on the Quest: open the URL the bridge prints, accept the certificate once, Enter VR.
 #   # Hold GRIP to move the arm (clutch), TRIGGER closes the jaw, A/X re-centres.
@@ -42,46 +43,93 @@ task: pick_place
 scene:
   num_envs: 1
   env_spacing: 1.0
+  spawn_jitter: false       # the block spawns where `pos` says, every reset (the task jitters it)
   robot:
     type: so101_full        # the parallel gripper; IK is wired for this robot only
     rot: [0.0, 0.0, 0.0, 1.0]
+    # Start ABOVE the block, fingers 9 degrees up, their free ends over it: the task's rest pose
+    # put gripper_base at z = 0.06 inside the object. From the posture grid in docs/VR.md the
+    # grasp point starts at (0.273, 0.000, 0.130) and the same tilt is reachable down to
+    # (0.269, 0.036): a straight descent at a near-constant orientation, measured to a 68 mm
+    # floor with nothing in the way. MEASURED gripper geometry (docs/VR.md): the grasp point is
+    # the palm face; the pads run 95 mm forward of it and reach 41 mm below the finger line;
+    # the gear sits 16 mm below the line just ahead of the palm, the motor housing 28 mm below
+    # it and 62 mm behind. So the block goes under the pads, well forward of the palm.
     joint_pos:
       shoulder_pan: 0.0
-      shoulder_lift: -0.6
-      elbow_flex: 0.8
-      wrist_flex: 0.6
+      shoulder_lift: -0.3
+      elbow_flex: 1.0
+      wrist_flex: -0.6
       wrist_roll: 0.0
+    # Stiffer arm servos than the asset's 17.8 / 0.6. MEASURED: at those gains the shoulder
+    # holds 0.10-0.12 rad of error against gravity at reach (1.8-2.2 N.m), which is 45 mm at
+    # the fingers, and the task-space IK -- which steps from the current pose each time --
+    # never closes it: a commanded descent to 70 mm stopped at 118 mm on CPU and GPU alike.
+    # 200 N.m/rad leaves 0.01 rad (about 3 mm); 5 N.m.s/rad keeps it from ringing. The real
+    # STS3215 is a stiff position servo, so this is nearer the hardware, not further.
+    arm:
+      stiffness: 200.0
+      damping: 5.0
   objects:
     object:
       type: cuboid
       # Sized for THIS gripper and THIS arm, both measured: the parallel fingers close to
-      # 56 mm, so anything narrower is never gripped; and the grasp point cannot get below
-      # about 60 mm at table reach, so the block has to be tall enough to be met there.
-      # A 30 mm cube fails on both counts, and did.
+      # 56 mm, so anything narrower is never gripped; the pads are 60 mm tall about a finger
+      # line that bottoms out at 68 mm, so a 90 mm block meets them over 50 mm of its side.
       size: [0.07, 0.07, 0.09]
       mass: 0.05
-      pos: [0.27, 0.0, 0.045]    # 0.27 m out, where this arm reaches table height -- see header
+      # 0.35 m out: the pads cover x = 0.27-0.37 at the start pose, the housing x = 0.22-0.29,
+      # 28 mm below the finger line. At 0.27, 0.30 and 0.33 the housing's far corner landed on
+      # the block's top and the descent stopped at 115 mm on 6-10 N.m of contact -- block
+      # pinned, measured body by body. Here the block is 27 mm forward of the housing and the
+      # pads can go 60 mm down its sides.
+      pos: [0.35, 0.0, 0.045]
       color: [0.90, 0.35, 0.20]
     tray:
       type: static_cuboid
       size: [0.12, 0.12, 0.01]
-      pos: [0.27, 0.10, 0.005]
+      pos: [0.35, 0.10, 0.005]
       color: [0.30, 0.32, 0.36]
 
   cameras:
-    # What the operator sees on the floating screen in the headset. 480x360 is deliberate:
-    # the frame rides the observation packet every third step, and this is half a megabyte.
-    # PhysX renders this at ~45 steps/s; a Newton deformable scene would not (docs/PHYSICS.md).
-    demo_cam:
+    # What the operator sees in the headset: three floating screens, the first one large.
+    # The frames ride the observation packet and a sender thread streams them to the page.
+    # 20 fps each: one camera render costs 26 ms however cheap the RTX settings, so the rate is
+    # the only dial -- 30 fps left 43 steps/s live, 20 fps clears the 50 the arm needs to run in
+    # real time (docs/VR.md). Names sort alphabetically on the page.
+    a_front:
       type: tiled
-      prim_path: "{ENV_REGEX_NS}/DemoCam"
+      prim_path: "{ENV_REGEX_NS}/FrontCam"
       resolution: [480, 360]
       pos: [0.62, -0.30, 0.38]
       look_at: [0.24, 0.02, 0.06]
       focal_length: 18.0
+      update_period: 0.05       # 20 fps: a render is 26 ms whatever the settings (docs/VR.md)
+    b_top:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/TopCam"
+      resolution: [320, 240]
+      pos: [0.32, 0.0, 0.65]
+      look_at: [0.32, 0.0, 0.0]
+      up: [1.0, 0.0, 0.0]
+      focal_length: 16.0
+      update_period: 0.05
+    c_side:
+      type: tiled
+      prim_path: "{ENV_REGEX_NS}/SideCam"
+      resolution: [320, 240]
+      pos: [0.32, 0.55, 0.20]
+      look_at: [0.32, 0.0, 0.06]
+      focal_length: 18.0
+      update_period: 0.05
 
 sim:
   episode_length_s: 600.0   # teleop: nothing here is scored, so do not reset under the operator
+  # One environment: PhysX on the CPU, not the GPU. MEASURED (docs/VR.md): a physics substep
+  # is 0.6 ms on the CPU and 5.3 ms on the GPU, where one arm is all launch overhead, and the
+  # IK's apply_action goes 3.9 -> 1.4 ms with it. The env step falls from 31 ms to 8 ms.
+  # Rendering stays on the GPU regardless. Newton backends need cuda; this is PhysX.
+  device: cpu
 
 control:
   source: zmq               # the VR bridge answers on this socket
@@ -95,5 +143,13 @@ control:
   # Five joints cannot hold a commanded 6-DoF orientation across this workspace, and DLS
   # trades position away trying. So the arm follows the controller's POSITION and the jaws'
   # orientation follows the arm. docs/VR.md has the table and what that costs at the table.
-  ik_orientation_weight: 0.0
+  # Orientation is commanded RELATIVE to how the fingers pointed when the grip closed (the
+  # bridge anchors on the pose the simulator reports), so it starts at zero error. Measured,
+  # fake controller turning its wrist 40 degrees during the carry:
+  #     weight   orientation error   position error
+  #     0.1          17 deg             22 mm        <- this config
+  #     0.2          24 deg             60 mm
+  #     0.3          16 deg             59 mm
+  #     0.0           -- (drifts)        4-20 mm     wrist_roll spins by itself
+  ik_orientation_weight: 0.1
   action_horizon: 1

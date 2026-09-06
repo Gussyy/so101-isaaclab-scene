@@ -404,6 +404,19 @@ def test_vr_teleop() -> None:
             print('SINGLE JAW ACCEPTED')
 
         cfg = load_config('configs/vr_teleop.yaml')
+        pr = build_env_cfg(cfg, device='cuda:0', num_envs=1).events.reset_object_position.params['pose_range']
+        print('NOJITTER' if all(tuple(v) == (0.0, 0.0) for v in pr.values()) else f'JITTER LEFT ON {pr}')
+        arm = build_env_cfg(cfg, device='cuda:0', num_envs=1).scene.robot.actuators['arm']
+        print('ARMGAINS' if (arm.stiffness, arm.damping) == (200.0, 5.0) else f'ARM GAINS WRONG {arm.stiffness} {arm.damping}')
+        cfg['scene']['robot']['arm'] = {'stiffnes': 200.0}
+        try:
+            build_env_cfg(cfg, device='cuda:0', num_envs=1)
+        except ValueError:
+            print('ARMKEYCHECKED')
+        else:
+            print('BAD ARM KEY ACCEPTED')
+
+        cfg = load_config('configs/vr_teleop.yaml')
         cfg['control']['ik_orientation_weight'] = [1.0, 1.0, 0.0]
         w = build_env_cfg(cfg, device='cuda:0', num_envs=1).actions.arm_action.controller.orientation_weight
         print('WEIGHT' if w == (1.0, 1.0, 0.0) else f'WEIGHT WRONG {w}')
@@ -423,6 +436,9 @@ def test_vr_teleop() -> None:
     record("IK is refused for the single-jaw robot", "REFUSED" in lines, last)
     record("ik_orientation_weight takes a per-axis triple", "WEIGHT" in lines, last)
     record("a malformed orientation weight is refused", "CMDCHECKED" in lines, last)
+    record("scene.robot.arm sets the arm servo gains", "ARMGAINS" in lines, last)
+    record("an unknown scene.robot.arm key is refused", "ARMKEYCHECKED" in lines, last)
+    record("scene.spawn_jitter: false pins the object where placed", "NOJITTER" in lines, last)
 
     # The page the Quest opens: exists, and speaks the one message shape the bridge parses.
     page = (REPO / "scripts/vr/index.html").read_text(encoding="utf-8")

@@ -495,10 +495,11 @@ python scripts/run_all_tests.py --sim    # plus scene load, cameras, ZMQ-driven 
 
 ```bash
 python scripts/vr_gripper_server.py --no-tls                          # terminal 1: the bridge
-python scripts/run.py --config configs/vr_teleop.yaml --viz kit --steps 0   # terminal 2: the sim
+python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: the sim, 55-60 steps/s (add --viz kit for a window; it halves that)
 # headset on Link: open http://localhost:8443/ in Chrome on this PC, Enter VR.
-# GRIP = move the arm (clutch), TRIGGER = close the jaw, A = re-centre, B = reset the scene.
-# The simulator's camera floats in front of you in the headset.
+# GRIP = move and turn the arm (clutch), TRIGGER = close the jaw, A = re-centre, B = reset.
+# Tilt and roll follow your wrist; the heading is always toward where the arm reaches (5 joints).
+# Three of the simulator's cameras float in front of you; every session is logged to logs/vr/.
 ```
 
 The Quest's own browser reads the right controller through WebXR and streams its pose to the
@@ -508,11 +509,13 @@ stays on the monitor — Isaac Lab's own XR teleop is **Linux-only**, and this i
 works on Windows.
 
 Measured with a scripted controller, no headset: the arm tracks the commanded grasp point to
-**4–20 mm** inside its reach, closes on a 70 mm block, lifts it 31 mm and carries it — then
-drops it on its side partway. That is position-only IK; with any orientation constraint, five
-joints chasing a 6-DoF pose park at a joint limit 150–220 mm off, and this arm physically
-cannot point its jaws down below 0.22 m anyway. [docs/VR.md](docs/VR.md) has every setting
-tried and the posture grid that proves the last point.
+**8–16 mm mean, 2–4° in orientation** through a reach-down, grip, lift and carry. Tilt and roll
+follow the wrist; the heading is projected onto the one the arm can take (five joints), and the
+orientation target is anchored to the pose the simulator reports, so the fingers never turn on
+their own. The arm servos are stiffened (200 N·m/rad) because the asset's 17.8 sagged 45 mm at
+reach, and the block sits under the finger pads, 27 mm forward of the motor housing — the
+gripper's meshes were measured to place it, after three positions had put it under the
+housing. [docs/VR.md](docs/VR.md) has every setting tried, the posture grids and the numbers.
 
 **Verified on a Quest 3 over Link** (Chrome on the PC at `https://localhost:8443/`): the frame
 mapping — forward came out forward — GRIP as the clutch, TRIGGER as the jaw, and the simulator
