@@ -70,12 +70,18 @@ function connect() {
     } catch (e) { /* a torn frame; the next one replaces it */ }
   };
 }
-function send(msg) {
+// One gate per FRAME, not per message: with two controllers the first message of a frame
+// used to set lastSend and the second, a microsecond later, was dropped -- the Quest lists
+// the left controller first, so the right arm barely moved (91 samples against 1,133).
+function sendDue() {
   const now = performance.now();
-  if (!ws || ws.readyState !== 1 || now - lastSend < 1000 / SEND_HZ) return;
-  lastSend = now; sent++;
-  ws.send(JSON.stringify(msg));
+  if (!ws || ws.readyState !== 1 || now - lastSend < 1000 / SEND_HZ) return false;
+  lastSend = now; return true;
 }
+function send(msg) {                 // one message (the mouse test): gate and send
+  if (sendDue()) sendNow(msg);
+}
+function sendNow(msg) { sent++; ws.send(JSON.stringify(msg)); }
 function log(s) { lines = [s, ...lines].slice(0, 4); render(); }
 const m3 = v => '(' + v.map(x => x.toFixed(2)).join(', ') + ')';
 function render() {
@@ -174,7 +180,9 @@ async function enterVR() {
         screens.draw(mul4(v.projectionMatrix, v.transform.inverse.matrix));
       }
     }
+    const due = sendDue();
     for (const src of session.inputSources) {
+      if (!due) break;
       if ((src.handedness !== 'right' && src.handedness !== 'left') || !src.gripSpace) continue;
       const p = frame.getPose(src.gripSpace, ref);
       if (!p) continue;
@@ -188,7 +196,7 @@ async function enterVR() {
         recentre: !!(b[4] && b[4].pressed),
         reset: !!(b[5] && b[5].pressed),
       };
-      lastMsg = msg; send(msg);
+      lastMsg = msg; sendNow(msg);
     }
     if (sent % 30 === 0) render();
   });

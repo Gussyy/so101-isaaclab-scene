@@ -370,6 +370,12 @@ not a claim that every pick succeeds.
 played out to nobody and the clutch anchored on the final static pose. The command never moved
 and the arm sat still for 900 steps. It now starts on the first request.
 
+**Found on the headset, not by reading: the right arm would not move.** The page's send
+function rate-limited per *message*; with two controllers the first one in a frame set the
+timestamp and the second, a microsecond later, was dropped. The Quest lists the left
+controller first, so one session's logs held 1,133 engaged samples on the left driver and 91
+on the right. The gate is per frame now and both hands go out together.
+
 ## A camera on each gripper
 
 The view the LeRobot wrist camera gives — both finger tips in the bottom corners of a wide
