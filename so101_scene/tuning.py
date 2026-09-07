@@ -223,7 +223,22 @@ def so101_full_cfg(
         )
     return ArticulationCfg(
         prim_path=prim_path,
-        spawn=sim_utils.UsdFileCfg(usd_path=SO101_FULL_USD.as_posix()),
+        spawn=sim_utils.UsdFileCfg(
+            usd_path=SO101_FULL_USD.as_posix(),
+            # The asset binds no physics material at all, so every collider -- the finger pads
+            # included -- gripped with whatever PhysX defaults to, which is 0.5/0.5 (measured:
+            # the stage's materials were the ground's 0.5 and the task object's 1.2/1.0, and
+            # nothing on the robot). That default is about right for printed pads, so this
+            # binds it explicitly rather than changing it: same numbers, but visible and
+            # tunable per config (`scene.robot.gripper.static_friction`). MEASURED with the
+            # shirt (docs/VR.md): at 1.0/0.9 the pads carry it higher, 216 mm against 168, and
+            # then keep it hung on the pads after the jaw opens -- grip and release trade off.
+            physics_material=sim_utils.RigidBodyMaterialCfg(
+                static_friction=float(g.get("static_friction", 0.5)),
+                dynamic_friction=float(g.get("dynamic_friction", 0.5)),
+                restitution=0.0,
+            ),
+        ),
         init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.0)),
         actuators={
             # Same gains as the single-jaw arm: identical joints, identical limits.

@@ -460,6 +460,13 @@ def test_vr_teleop() -> None:
               and type(shirt.spawn.physics_material).__name__ == 'PhysxSurfaceDeformableBodyMaterialCfg'
               and tuple(shirt.init_state.pos) == (0.30, -0.05, 0.02))
         print('PHYSXCLOTH' if ok else f'PHYSX CLOTH WRONG {type(shirt).__name__} {type(shirt.spawn).__name__} {shirt.init_state.pos}')
+        # The pads carry a physics material of their own: the asset binds none, so without
+        # this they grip with whatever PhysX defaults to (docs/VR.md).
+        cfg2 = load_config('configs/vr_teleop.yaml')
+        cfg2['scene']['robot']['gripper'] = {'static_friction': 0.8, 'dynamic_friction': 0.7}
+        mat = build_env_cfg(cfg2, device='cuda:0', num_envs=1).scene.robot.spawn.physics_material
+        print('PADFRICTION' if (mat is not None and mat.static_friction == 0.8 and mat.dynamic_friction == 0.7)
+              else f'PAD FRICTION WRONG {mat}')
         from simbridge.builder import check_deformables
         cfg['sim']['device'] = 'cpu'
         try:
@@ -484,6 +491,7 @@ def test_vr_teleop() -> None:
     record("a second arm without IK actions is refused", "ARM2NEEDSIK" in lines, last)
     record("a physx_cloth object builds as a PhysX surface deformable", "PHYSXCLOTH" in lines, last)
     record("a physx_cloth object on CPU physics is refused at parse time", "PHYSXCLOTHCPU" in lines, last)
+    record("the finger pads carry a physics material the config can tune", "PADFRICTION" in lines, last)
 
     # The page the Quest opens: exists, and speaks the one message shape the bridge parses.
     page = (REPO / "scripts/vr/index.html").read_text(encoding="utf-8")

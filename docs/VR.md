@@ -35,6 +35,77 @@ observation packet every third step, the bridge JPEG-encodes it at up to 15 Hz a
 down the same WebSocket the controller comes up, and the page draws it on one textured quad.
 It is also drawn on the page itself, so the stream can be checked from any browser.
 
+## The same controller, flying a gripper with no arm
+
+```bash
+python scripts/vr_gripper_server.py --free          # add --fake for a scripted controller
+python scripts/floating_gripper.py --stream --viz kit
+```
+
+Same bridge, same page, same buttons, same eight numbers on the socket — the simulator on the
+other end is `scripts/floating_gripper.py` instead of the arm, so the jaws go exactly where the
+controller goes with nothing to reach around them. This is the closest thing here to holding an
+object in a VR game, and it is what a UMI-style demonstration wants: the operator's motion, not
+an arm's approximation of it.
+
+Two flags are what make it work, and both are about the difference between a gripper on an arm
+and a gripper on nothing:
+
+**`--free` on the bridge** turns off the yaw lock. That lock exists because the arm's finger
+heading *is* its base yaw, so a commanded heading the base cannot reach costs the IK 37 mm of
+position (above). A free gripper has no base, so the lock would instead turn the jaws by
+wherever the operator happens to be standing.
+
+**`--stream` on the simulator** attaches a 720x540 view to the observation packet, which is what
+puts a picture on the headset's floating screen. Without it the operator is flying blind — the
+arm path gets this for free from `scene.cameras` in the YAML, and the floating gripper's scene
+has no camera unless asked for one.
+
+The bridge anchors the operator on `ee_pose`, the grasp point read back out of the simulator, so
+the first squeeze of the grip button never jumps: the floating gripper reports the midpoint
+between its jaws (`GRASP_OFFSET` rotated into the world), which is the same point the action
+commands. It also spawns already pointing down, because the bridge takes the first steady pose
+the simulator reports as its orientation target — spawned at identity, it was handed "jaws
+sideways" as the thing to hold.
+
+Checked with no headset: `python scripts/vr_gripper_server.py --demo` (frames, clutch, jaw, the
+yaw lock and its absence under `--free`), and the two processes run together with `--fake`,
+which takes home from the simulator's start pose (0.200, 0.300, 0.275), moves the gripper the
+155 mm the script asks for, and latches the jaws shut on the trigger. What the scripted
+controller does *not* do is complete a pick — its motion is written around the arm's workspace.
+The grasp physics are checked separately, by `python scripts/floating_gripper.py --demo`, which
+lifts the block and puts it down 140 mm away.
+
+### Known: `--stream` and `--record` render blank on this install
+
+Camera sensors produce nothing in a **standalone** script -- `SimulationContext` +
+`InteractiveScene`, which is what `floating_gripper.py` is -- while the manager-based path
+(`gym.make`, used by `scripts/run.py` and `scripts/capture_clip.py`) renders the same scene
+correctly at the same moment. Every pixel comes back 245.
+
+Not this repo. Isaac Lab's own unmodified tutorial shows it, which is how it was pinned down:
+
+```bash
+python IsaacLab/scripts/tutorials/04_sensors/add_sensors_on_robot.py --num_envs 1
+```
+
+with `args_cli.enable_cameras = True` set after `parse_args` (this build has no
+`--enable_cameras` flag), printing the rgb tensor instead of its shape: `min 245 max 245 uniq 1`.
+Depth comes back `inf` across the whole frame, so it is the geometry that never reaches the
+render delegate, not the lighting. The renderer logs
+`readTransformsFromFabricInRenderDelegate and geometry streaming are enabled together but this
+can cause issues`; turning either off through carb hangs Kit on startup, so that is not the
+workaround. Isaac Sim 6.0.1 / Isaac Lab 3.0 `develop@a384e2f`, driver 596.49, RTX 4070 Ti.
+
+Two things that are *not* the cause, both checked: a stale Isaac process holding VRAM (that
+does break rendering -- 6.8 of 12 GB gone made `capture_clip.py` blank too -- but freeing it
+fixed only the manager-based path), and the camera's aim.
+
+`floating_gripper.py` says so rather than writing a white file: `warn_if_blank` prints once on
+the first frame if every pixel is identical. Until it is fixed, drive the gripper from the
+monitor, or use the immersive route (`--vr`), which renders through Kit's own XR pipeline and
+does not go through a camera sensor at all.
+
 ## Why not Isaac Lab's own XR teleop
 
 Isaac Lab ships one (`isaaclab_teleop`, CloudXR, `--xr`), and its guide is explicit:
@@ -513,7 +584,7 @@ pads 49 mm apart when closed: fine for a mug, and no use on cloth — a layer of
 rest offsets thick to a rigid pad (10 mm here), so with a 49 mm gap a single layer can never
 be pinched whatever the material. The prismatic stop in `physics.usda` is now −0.068 (each
 pad moves 0.97 mm per mm of travel), and `tuning.py`'s travel and close command follow.
-Measured after the change: the close command drives the fingers to −0.062, where the pads meet and stop (the −0.068 stop itself is never reached); open is unchanged at 134 mm. ASSUMED, not measured on the real arm, that its
+Measured after the change: the close command drives the fingers to −0.062 of the −0.068 stop (the PD drive's steady-state error, not contact — the pads do not collide with each other); open is unchanged at 134 mm. The 134 and 49 mm are the fingers' outer extents, not the gap between the pad faces. ASSUMED, not measured on the real arm, that its
 jaw closes fully; if it stops short, put the real gap's travel back in both places.
 
 **Measured, headless, four cameras at 20 fps:** **12.8 steps/s** with the wrist cameras rendering every step and the floating views every fourth (the fps probe below; 400-step `run.py` runs at this layout gave 14.9 with the old cadence). 19 with the cameras off, 19 with the shirt removed instead: the floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (the shirt alone is 6 ms a physics step) or the cameras. That is a quarter of real time: the arms follow the operator at a quarter of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
@@ -538,13 +609,33 @@ asset was audited (`scripts/collision_audit.py`, pxr, no Kit), then what PhysX a
 them was read back at runtime through `request_convex_collision_representation` and drawn
 (`docs/vr_cooked_hulls.png`, below). The asset carries **18 colliders, all triangulated meshes**
 (`purpose = guide`, 354,974 source triangles — copies of the visual meshes), one per part:
-16 `convexHull`, 2 `convexDecomposition` (the fingers, since d98bd23). No contact or rest
-offset, no decomposition parameter is authored anywhere on the robot, so PhysX's own defaults
-apply; `gripper_frame_link` has no collider (a frame). Cooked, the source triangles are gone:
+15 `convexHull`, 3 `convexDecomposition` (the fingers since d98bd23, the housing below). No
+contact or rest offset, no decomposition parameter, and **no physics material** is authored
+anywhere on the robot, so PhysX's defaults apply; `gripper_frame_link` has no collider (a
+frame). Two of those defaults matter. **The pads had no friction of their own**: they gripped
+the 1.0-friction shirt with whatever PhysX falls back to, 0.5/0.5, while the stage's only
+authored materials were the ground's and the task object's 1.2/1.0. `so101_full_cfg` now
+binds a rigid-body material at the robot root, inherited by every collider, at that same
+0.5/0.5 — the right ballpark for printed pads — so the number is visible and tunable
+(`scene.robot.gripper.static_friction` / `dynamic_friction`) instead of implicit. Raising it
+was measured, not assumed: at **1.0/0.9** the same grasp mock carries the shirt to 216 mm
+instead of 168, and then keeps it hung on the pads after the jaw opens (213 mm at the end of
+the run, against 160). Grip and release trade off, and rubber pads would need the cloth
+retuned with them. **The arm does not self-collide** — `newton:selfCollisionEnabled = 0` on the articulation root,
+`physxArticulation:enabledSelfCollisions` unauthored, which is off by default too — so the
+pads pass through each other and through the gear; nothing but the joint stop limits the
+close. Cooked, the source triangles are gone:
 each `convexHull` part becomes one hull of 27–41 vertices, each finger 16 hulls (218–235
 vertices) — **2,020 hull vertices for both arms**, and the 355k triangles cost nothing after
 cooking. No `ConvexMeshCookingTask: failed to cook GPU-compatible mesh` in any log: nothing
 falls back to CPU collision.
+
+**The offsets still land, despite the deprecation notice.** This PhysX marks
+`physxCollision:contactOffset` and `restOffset` "Deprecated: use `newton:contactGap` /
+`newton:contactMargin`", and every robot collider already carries `NewtonCollisionAPI`, so the
+shirt's authored offsets looked like they might be ignored. Read back from the running stage
+they are there: `shirt/sim_mesh` carries `contactOffset 0.012`, `restOffset 0.005` under
+`PhysxCollisionAPI`, which is what makes a layer of cloth 10 mm thick to a pad.
 
 **How much air a hull adds** — mesh volume against its convex hull, per part:
 

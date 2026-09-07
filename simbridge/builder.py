@@ -274,7 +274,8 @@ def physics_options(preset) -> dict[str, Any]:
 
 # What a `scene.robot.gripper` block may set. Rejected up front like every other config key --
 # a typo'd `stifness` that silently leaves the default is the bug this repo keeps re-learning.
-_GRIPPER_KEYS = {"open", "close", "stiffness", "damping", "effort", "velocity"}
+_GRIPPER_KEYS = {"open", "close", "stiffness", "damping", "effort", "velocity",
+                 "static_friction", "dynamic_friction"}
 # What a `scene.robot.arm` block may set: the five arm servos' PD gains and torque cap.
 _ARM_KEYS = {"stiffness", "damping", "effort"}
 
