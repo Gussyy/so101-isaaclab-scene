@@ -531,6 +531,56 @@ grasp landing on the sleeve): the fake controller's 12-second script (reach out 
 
 Two and a half times the frame rate for a fifth of the arm speed; the floating views at a quarter rate cost nothing measurable, so they stay. **The Kit viewer costs 25 ms a step** (15.6 → 10.3 steps/s with `--viz kit`), so the live simulator now runs headless; add the flag only to watch on the monitor. Two levers were measured and not taken: physics dt 0.02 with decimation 1 gives 25 steps/s and better tracking (6.5 mm mean, the reach dip gone) but the pads lose the cloth — at 50 Hz physics both the sleeve grasp and the body grasp failed where 100 Hz caught them — so the cloth keeps its 100 Hz; and solving the IK once per env step instead of once per substep gained 0.9 steps/s, inside run-to-run noise, with the scripted grasp missing once, so it is not shipped. The floor is GPU PhysX, and cloth is GPU-only: this scene does not get past ~16 steps/s on this machine, and real time (50) is the crate scene's, on CPU physics.
 
+## The robot's colliders, checked
+
+What PhysX collides with is not the robot you see. Every collision mesh on the SO-ARM101-FULL
+asset was audited (`scripts/collision_audit.py`, pxr, no Kit), then what PhysX actually cooked from
+them was read back at runtime through `request_convex_collision_representation` and drawn
+(`docs/vr_cooked_hulls.png`, below). The asset carries **18 colliders, all triangulated meshes**
+(`purpose = guide`, 354,974 source triangles — copies of the visual meshes), one per part:
+16 `convexHull`, 2 `convexDecomposition` (the fingers, since d98bd23). No contact or rest
+offset, no decomposition parameter is authored anywhere on the robot, so PhysX's own defaults
+apply; `gripper_frame_link` has no collider (a frame). Cooked, the source triangles are gone:
+each `convexHull` part becomes one hull of 27–41 vertices, each finger 16 hulls (218–235
+vertices) — **2,020 hull vertices for both arms**, and the 355k triangles cost nothing after
+cooking. No `ConvexMeshCookingTask: failed to cook GPU-compatible mesh` in any log: nothing
+falls back to CPU collision.
+
+**How much air a hull adds** — mesh volume against its convex hull, per part:
+
+| part | body | hull / mesh | hull bbox (mm) |
+|---|---|---|---|
+| `base_visual` (gripper housing, U-shaped) | gripper_base | **3.6×** | 61 × 120 × 62 |
+| `arm_r_visual` / `arm_l_visual` (L-shaped finger + rack) | arm_r / arm_l | 5.5× as one hull → decomposed | 98 × 75 × 60 |
+| `wrist_roll_pitch_so101_v2` | wrist_link | 3.6× | 78 × 62 × 36 |
+| `motor_holder_so101_wrist_v1` / `_base_v1` | lower arm / shoulder | 3.8× / 3.9× | 28 × 56 × 37 |
+| `base_motor_holder_so101_v1`, `base_so101_v2` | base_link | 4.0× / 3.1× | 80 × 48 × 31, 87 × 111 × 72 |
+| `rotation_pitch_so101_v1` | shoulder_link | 2.2× | 60 × 46 × 84 |
+| `under_arm_so101_v1`, `upper_arm_so101_v1` | lower / upper arm | 1.8× / 1.7× | 131 × 64 × 24, 25 × 67 × 142 |
+| servos (`sts3215_*`), `gripper_gear_visual`, mounting plate | – | 1.1–1.7× | – |
+
+The one that touches the cloth and the table is the gripper housing: a U-shaped part wrapped in
+a 61 × 120 × 62 mm block, 3.6 times its own volume — the "housing 28 mm below the finger line"
+of the gripper-geometry section is this hull's underside, and it is what lands on the shirt
+when the pads go down. It is now `convexDecomposition` like the fingers (`instances.usda`):
+16 hulls, 272 vertices, the U's underside back. The body-grasp mock is unchanged — closes at
+31 mm, the shirt's top from 55 mm to **168 mm**, CARRIED. Cost, headless, 400 steps, GPU
+otherwise idle: **9.8–11.0 steps/s** with the decomposition against **11.4–11.6** with the hull. The
+other fat hulls (wrist, motor holders, base) never meet the cloth or the other arm's gripper
+in this scene and were left alone; Isaac Lab's performance guide would go further and drop
+the colliders on links that touch nothing (the base's four, the shoulder's three), which
+would be the next cut if the collision phase ever shows in the profile — it does not today:
+the GPU substep is launch overhead, not contacts.
+
+**Two log lines that look like trouble and are not.** `Deformable body view is not valid for:
+/World/envs/env_[^/]+/shirt. Please check PhysX logs.` fires once in every run, including the
+mocks in which that shirt is then carried to 185 mm — it is Isaac Lab initialising the asset
+before the simulation has played, when no view exists yet. And the wrist cameras' `Projection`
+warning is the fisheye lens the RTX hydra delegate does not know by name.
+
+![the right arm's cooked collision hulls: side, top, gripper close-up](vr_cooked_hulls.png)
+The decomposition costs about a step a second (the cloth now meets 16 small hulls on each housing instead of one big one); revert is one word in `instances.usda`, `base_visual_1`'s `physics:approximation` back to `convexHull`, if the frame rate matters more than where the housing really is.
+
 ## Making it fast: where a step goes
 
 The target is 50 steps/s — the environment steps at 50 Hz (`dt` 0.01, decimation 2), so that

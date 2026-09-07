@@ -373,7 +373,8 @@ def test_vr_teleop() -> None:
     """The VR chain, minus the headset: bridge self-check, GUI self-check, IK wiring."""
     print("\nVR teleop")
     for path, label in (("scripts/vr_gripper_server.py", "bridge: frames, clutch, jaw, hold"),
-                        ("scripts/scene_gui.py", "scene GUI: round-trip, refuses duplicates")):
+                        ("scripts/scene_gui.py", "scene GUI: round-trip, refuses duplicates"),
+                        ("scripts/collision_audit.py", "collision audit: 18 colliders, fingers and housing decomposed")):
         code, out = sh([PY, path, "--demo"], timeout=180)
         record(label, code == 0, out.strip().splitlines()[-1] if out.strip() else "")
 
