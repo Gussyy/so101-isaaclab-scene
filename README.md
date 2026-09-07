@@ -501,9 +501,9 @@ python scripts/run.py --config configs/vr_teleop.yaml --steps 0   # terminal 2: 
 # move and turn (clutch), TRIGGER = close the jaw. Right B / A = record an episode / end it
 # (LeRobot layout, datasets/vr_<time>). Left X = reset the scene, left Y = both arms glide
 # back to their start pose. Both arms start in their folded rest pose. Tilt and roll follow your
-# wrist; the heading is always toward where the arm reaches (5 joints). The scene is a T-shirt
-# (PhysX cloth) flat on the table between the arms, for folding; the crate, mug and soup can
-# are configs/vr_teleop_crate.yaml. Each gripper carries a 170-degree wrist camera; the right
+# wrist; the heading is always toward where the arm reaches (5 joints). The scene is LeHome's
+# garment task: its shirt at its size (520 mm, PhysX cloth) between two arms 0.46 m apart,
+# for folding; the crate, mug and soup can are configs/vr_teleop_crate.yaml. Each gripper carries a 170-degree wrist camera; the right
 # one is the big panel in the headset.
 # Three of the simulator's cameras float in front of you; every session is logged to logs/vr/.
 ```

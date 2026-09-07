@@ -456,22 +456,57 @@ the wall takes 7 cm, and the crate's near half is within both arms' reach.
 The goal-pose and grasp-frame markers (`/Visuals/Command/*` and the IK target frame) are off:
 `scene.debug_markers: false`. They are for a policy's author and float in the operator's view.
 
-## Clothes folding: the shirt, on PhysX
+## Clothes folding: LeHome's garment scene, on the PhysX this Isaac Sim has
 
-The shipped scene (`configs/vr_teleop.yaml`) is the two arms and a T-shirt flat on the table
-between them, `shirt: {type: physx_cloth, usd_path: assets/garment/shirt.usd, scale: 0.18}`.
-LeHome's engine was the first thing tried, since that is where the shirt asset came from:
-LeHome runs its cloth as **PhysX particle cloth**, and that schema is gone from the PhysX in
-Isaac Sim 5+ (`isaaclab_physx` has no particle system at all; only the OmniPhysics deformable
-bodies). The Newton VBD path (`configs/lehome_bedroom_shirt.yaml`) stays a separate config:
-every camera render there does a full particle writeback and a device stall, 1.9–4.2 steps/s
-(docs/PHYSICS.md). So the shirt is a **PhysX surface deformable** — the same engine as the arms,
-the same contacts, and a camera costs what it costs on a rigid scene. It is GPU-only, so this
-config is the one VR scene on `sim.device: cuda:0`. The material is the set Isaac Lab's own PhysX
-cloth-lifting task ships (Young's modulus 1e6, 1 mm thick, 5 mm rest offset) except the
-friction, 1.0 instead of their 10 (the mock below says why); solver stiffnesses, not an
-identified fabric. The task's terms still need a rigid `object`, so a 2 cm cube sits
-parked behind the left arm, out of every camera.
+The shipped scene (`configs/vr_teleop.yaml`) is LeHome's `garment_bi` task as near as this
+build allows: the same two SO-101s **0.46 m apart** (LeHome puts them at x 6.97 and 7.43),
+LeHome's shirt (`TCLC_002`, remeshed at 6 mm as `assets/garment/shirt.usd`) at **LeHome's
+scale, 0.45** — 520 mm sleeve to sleeve, 330 mm collar to hem — dropped from **0.13 m** between
+the arms, 0.275 m out, which is where LeHome drops it (7.175, 4.175, 0.63 over arms at z 0.5).
+The first cut of this scene had the shirt at 0.18 (208 mm, the size the one-arm Newton config
+uses so the whole garment stays inside one arm's reach); that is a doll's shirt, and gone.
+
+**LeHome's engine cannot run here, and that is Isaac Sim's doing, not a choice.** LeHome's
+`GarmentObject` is `isaacsim.core.prims.SingleClothPrim` over PhysX *particle cloth* (PBD:
+32 solver iterations, CCD, self-collision, stretch 1e8, bend 100, shear 100, spring damping
+10, `particle_mass` 1e-2 per particle, friction 1.0 — `particle_garment_cfg.yaml`). LeHome
+pins Isaac Sim 5.1.0, where that class is real. In this Isaac Sim 6.0.1 it is a stub that
+raises:
+
+> ClothPrim is no longer available. Omniverse PhysX removed the deprecated particle-based
+> cloth features. Please use the new deformable body API in isaacsim.core.experimental instead.
+
+`omni.physx` 110.1.2's changelog (2026-03-30) says it: "Removed deprecated deformable and
+particle cloth schemas and functionality"; the installed `PhysxSchema` has no
+`PhysxParticleClothAPI` (0 hits in the schema DLL against 43 for `PhysxParticleSystem`), and
+`particleUtils` has particle *sets* (fluids, granular) and no cloth. Isaac Lab's kit
+experience does not load the deprecated `isaacsim.core.prims` in any case. What PhysX 110 has for cloth is the **surface deformable** (the OmniPhysics schema), so
+that is what the shirt is: `type: physx_cloth`, the same engine as the arms and the same
+contacts, GPU-only (`sim.device: cuda:0`). The Newton VBD path
+(`configs/lehome_bedroom_shirt.yaml`) is the other option and stalls on every camera render
+(1.9–4.2 steps/s, docs/PHYSICS.md), which rules it out for a headset.
+
+**The material was tuned by dropping the shirt, not copied.** A surface deformable's numbers
+(Young's modulus, bend stiffness, density, thickness) are not PBD spring stiffnesses, so
+LeHome's cannot be pasted. The reference set Isaac Lab ships for its own PhysX cloth task
+(bend 1e6, Young 1e6, density 1000) drops onto a table as a 78 mm shell — paper. Dropped from
+0.13 m at scale 0.45, 300 steps, 2572 nodes:
+
+| bend | Young | density | settled top | mean | footprint |
+|---|---|---|---|---|---|
+| 1e6 | 1e6 | 1000 | 78 mm | 27 mm | 613 × 345 mm |
+| 1e2 | 1e6 | 400 | 45 mm | 16 mm | 536 × 336 |
+| 1e0 | 1e5 | 400 | 46 mm | 15 mm | 536 × 336 |
+| 1e-2 | 1e5 | 400 | 44 mm | 15 mm | 534 × 336 |
+
+Bend at or under 100 drapes flat (two layers at a 5 mm rest offset each, plus the collar); the
+shipped shirt is **bend 10, Young 1e5, density 400** — a 140 g shirt, which a T-shirt is
+(LeHome's `particle_mass` 1e-2 over 14,746 vertices lands as 147 kg on the USD mass
+attribute, a number that never meant a shirt) — friction 1.0 (the reference's 10 kept the shirt hung over the pads
+after release), 1 mm thick, self-collision on. The cloth alone costs 6 ms a physics step at
+2572 nodes (165 steps/s with nothing else in the scene). Solver stiffnesses, not an
+identified fabric; the task's terms still need a rigid `object`, so a 2 cm cube sits parked
+behind the left arm, out of every camera.
 
 **The jaw closes.** The asset was authored with the finger stop at −0.044, which leaves the
 pads 49 mm apart when closed: fine for a mug, and no use on cloth — a layer of cloth is two
@@ -481,11 +516,20 @@ pad moves 0.97 mm per mm of travel), and `tuning.py`'s travel and close command 
 Measured after the change: the close command drives the fingers to −0.062, where the pads meet and stop (the −0.068 stop itself is never reached); open is unchanged at 134 mm. ASSUMED, not measured on the real arm, that its
 jaw closes fully; if it stops short, put the real gap's travel back in both places.
 
-**Measured, headless, four cameras at 20 fps:** **15.6 steps/s** with the shirt and four cameras at 20 fps (400 steps); 19.2 with the cameras off, 19.1 with the shirt removed instead, 15.3 with the 9 mm shirt mesh, 15.8 with the cameras at 10 fps. The floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (4 steps/s) or the cameras (4 steps/s). That is 0.3× real time: the arms follow the operator at a third of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
+**Measured, headless, four cameras at 20 fps:** **12.8 steps/s** with the wrist cameras rendering every step and the floating views every fourth (the fps probe below; 400-step `run.py` runs at this layout gave 14.9 with the old cadence). 19 with the cameras off, 19 with the shirt removed instead: the floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (the shirt alone is 6 ms a physics step) or the cameras. That is a quarter of real time: the arms follow the operator at a quarter of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
 
-**The mock on the shirt, fake controller on the right arm:** the fake controller's 12-second script (reach out from the rest pose, tilt, descend, close, lift, carry 150 mm left, release, rise) with the shirt placed under its grasp (world y −0.15, `pcloth.yaml`): the jaw closes at 37 mm on the shirt's collar bulk, the shirt's highest node goes from 51 mm at rest to **175 mm** in the carry, and drops back to 55 mm when the jaw opens — **CARRIED**. With the reference friction of 10 the shirt stayed hung over the pads after release (top at 185 mm); friction 1.0 holds and lets go, and is what ships. Tracking over the 940 steps after the first request **8.6 mm mean**; two transient dips of ~40 mm (15°) during the fast reach and the descent. The same script shows them with no shirt in the scene at all, on GPU and on CPU physics alike: with nothing under the pads the descent runs `wrist_flex` to its −1.66 stop and the pads onto the table, and the solver trades 15° of pitch for it. A transient of the script, not the cloth or the device; the crate mock (6.6 mm mean) had the mug under the pads.
+**The mock on the shirt, fake controller on the right arm** (the right arm at y −0.23, the fake's
+grasp landing on the sleeve): the fake controller's 12-second script (reach out from the rest pose, tilt, descend, close, lift, carry 150 mm left, release, rise), twice. On the shipped layout the grasp lands on a sleeve: the jaw closes at 28 mm, the shirt's highest node goes from 51 mm at rest to **185 mm** in the carry and settles at 80 mm after release, folded over — **CARRIED**. With the shirt moved under the grasp (`body_dt01.yaml`, the body under the pads): 61 mm at rest to **157 mm** in the carry, 125 mm after release — **CARRIED**. Tracking over the 940 steps after the first request **9 mm mean**; the ~40 mm dips during the fast reach and the descent are the script running `wrist_flex` into its stop with nothing under the pads (they appear with no shirt in the scene, on GPU and CPU alike).
 
-**The two-arm mock, fake controller on the right arm, the left arm holding:** the right arm reaches out from its rest pose, tilts, closes on the mug at 71 mm, lifts it to 123 mm, carries it 150 mm to the crate and releases it inside (the mug settles at 83 mm, leaning on a wall). Tracking error over the 940 steps after the first request **6.6 mm mean**, orientation **4.4° mean**; the left arm holds its rest pose to the millimetre throughout — **CARRIED**.
+**Smoother in the headset.** Two things made the headset lag, and neither was the physics. **The cameras rendered once every four steps.** A camera's `update_period` of 0.05 s against a 0.02 s env step flips it outdated at 0.08, 0.16, …, and `run.py` only read the camera data on even steps, so a new frame reached the headset every fourth env step: at 15.6 steps/s, **3.9 new frames a second**, whatever the bridge's 30 fps cap. Now `run.py` reads the cameras every step, the wrist cameras' `update_period` is the env step (0.02) and the two floating views render every fourth (0.08). Measured with a probe that steps the scene with zero actions and counts frames that actually change (300 steps, headless):
+
+| cadence | steps/s | wrist views | floating views |
+|---|---|---|---|
+| `update_period` 0.05 everywhere, cameras read on even steps (before) | 15.9 | 5.3 fps (3.9 live) | 5.3 fps |
+| wrist every step, floating every fourth (**shipped**) | 12.8 | **12.8 fps** | 3.2 fps |
+| wrist every step, floating views off | 12.9 | 12.9 fps | – |
+
+Two and a half times the frame rate for a fifth of the arm speed; the floating views at a quarter rate cost nothing measurable, so they stay. **The Kit viewer costs 25 ms a step** (15.6 → 10.3 steps/s with `--viz kit`), so the live simulator now runs headless; add the flag only to watch on the monitor. Two levers were measured and not taken: physics dt 0.02 with decimation 1 gives 25 steps/s and better tracking (6.5 mm mean, the reach dip gone) but the pads lose the cloth — at 50 Hz physics both the sleeve grasp and the body grasp failed where 100 Hz caught them — so the cloth keeps its 100 Hz; and solving the IK once per env step instead of once per substep gained 0.9 steps/s, inside run-to-run noise, with the scripted grasp missing once, so it is not shipped. The floor is GPU PhysX, and cloth is GPU-only: this scene does not get past ~16 steps/s on this machine, and real time (50) is the crate scene's, on CPU physics.
 
 ## Making it fast: where a step goes
 

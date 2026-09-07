@@ -47,7 +47,7 @@ scene:
   debug_markers: false      # no goal-pose / grasp-frame markers floating in the operator's view
   robot:
     type: so101_full        # the parallel gripper; IK is wired for this robot only
-    pos: [0.0, -0.15, 0.0]  # the RIGHT arm, driven by the right controller; the left arm is 30 cm over
+    pos: [0.0, -0.23, 0.0]   # LeHome's garment task puts its two SO-101s 0.46 m apart  # the RIGHT arm, driven by the right controller; the left arm is 30 cm over
     rot: [0.0, 0.0, 0.0, 1.0]
     # The folded rest pose of the real arm: upper arm leaning back, forearm folded down over
     # it, gripper resting in front of the base with the fingers pointing down, 20 degrees
@@ -77,7 +77,7 @@ scene:
   # arm's eight. It is scenery to the task's reward; a robot to the operator.
   robot2:
     type: so101_full
-    pos: [0.0, 0.15, 0.0]
+    pos: [0.0, 0.23, 0.0]
     rot: [0.0, 0.0, 0.0, 1.0]
     joint_pos:
       shoulder_pan: 0.0
@@ -100,14 +100,22 @@ scene:
       mass: 0.01
       pos: [-0.25, 0.45, 0.01]
       color: [0.3, 0.3, 0.3]
-    # 207 x 132 mm at this scale, turned so its length runs between the arms: centred 0.25 m
-    # out, where both arms' table-height reach (0.26-0.31 m from their own base) crosses it.
+    # LeHome's garment scene, as near as this PhysX allows (docs/VR.md): its shirt at its
+    # scale, 0.45 -- 520 mm sleeve to sleeve, 330 mm collar to hem -- dropped from 0.13 m
+    # between the arms, 0.275 m out, sleeves running between the arms. LeHome's particle
+    # cloth is gone from this PhysX, so the shirt is a surface deformable with a material
+    # tuned by dropping it (docs/VR.md): bend 10, Young 1e5, density 400 (a 140 g shirt).
+    # The old reference numbers (1e6 / 1e6 / 1000) landed as a 78 mm shell -- paper, not
+    # jersey.
     shirt:
       type: physx_cloth
       usd_path: assets/garment/shirt.usd
-      scale: 0.18
-      pos: [0.25, 0.0, 0.02]
+      scale: 0.45
+      pos: [0.275, 0.0, 0.13]
       rot: [0.0, 0.0, 0.7071068, 0.7071068]
+      bend_stiffness: 10.0
+      youngs_modulus: 1.0e5
+      density: 400.0
       # Cotton on rubber, roughly. The reference's 10 kept the shirt hung over the pads after release.
       static_friction: 1.0
       dynamic_friction: 1.0
@@ -129,7 +137,7 @@ scene:
       pos: [0.0, -0.10, 0.06]
       pitch: 10.0
       fisheye: 170.0
-      update_period: 0.05
+      update_period: 0.02   # every env step (docs/VR.md, Smoother in the headset)
     b_wrist_left:
       type: tiled
       attach: gripper_base
@@ -139,7 +147,7 @@ scene:
       pos: [0.0, -0.10, 0.06]
       pitch: 10.0
       fisheye: 170.0
-      update_period: 0.05
+      update_period: 0.02   # every env step (docs/VR.md, Smoother in the headset)
     c_front:
       type: tiled
       prim_path: "{ENV_REGEX_NS}/FrontCam"
@@ -147,7 +155,7 @@ scene:
       pos: [0.80, -0.45, 0.50]
       look_at: [0.27, 0.0, 0.06]
       focal_length: 18.0
-      update_period: 0.05
+      update_period: 0.08   # every fourth step
     d_top:
       type: tiled
       prim_path: "{ENV_REGEX_NS}/TopCam"
@@ -156,13 +164,15 @@ scene:
       look_at: [0.28, 0.0, 0.0]
       up: [1.0, 0.0, 0.0]
       focal_length: 16.0
-      update_period: 0.05
+      update_period: 0.08   # every fourth step
 
 sim:
   episode_length_s: 600.0   # teleop: nothing here is scored, so do not reset under the operator
   # PhysX on the GPU: the cloth is a deformable and those are GPU-only. The rigid scenes run
   # PhysX on the CPU (0.6 ms a substep against 5.3; configs/vr_teleop_crate.yaml).
-  # MEASURED, this scene, headless, four cameras at 20 fps (docs/VR.md): **15.6 steps/s** with the shirt and four cameras at 20 fps (400 steps); 19.2 with the cameras off, 19.1 with the shirt removed instead, 15.3 with the 9 mm shirt mesh, 15.8 with the cameras at 10 fps. The floor is GPU PhysX itself — a substep is 5.3 ms on the GPU against 0.6 on the CPU, and two arms' IK terms run per substep — not the cloth (4 steps/s) or the cameras (4 steps/s). That is 0.3× real time: the arms follow the operator at a third of their speed, and the recording's 50 fps is simulator time. The rigid crate scene stays on CPU physics at 55–60.
+  # MEASURED, headless (docs/VR.md, Smoother in the headset): 12.8 steps/s with the wrist
+  # cameras rendering every step, 12.8 new frames a second to the headset; 16 steps/s at 5 fps
+  # with the old cadence. A quarter of real time; the floor is GPU PhysX, and cloth is GPU-only.
   device: cuda:0
 
 control:

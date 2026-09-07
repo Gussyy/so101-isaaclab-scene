@@ -59,7 +59,7 @@ NAMED = {"ycb": "gelatin_box", "lehome": "burger_patty"}
 # The one that takes a `usd_path:` instead (the name column holds it): the shirt, at the scale
 # and spot the folding task uses. A PhysX deformable is GPU only (builtins.py), so picking it
 # writes `sim.device: cuda:0` whatever the physics dropdown says.
-PHYSX_CLOTH = {"usd_path": "assets/garment/shirt.usd", "scale": 0.18, "pos": [0.30, -0.05, 0.02]}
+PHYSX_CLOTH = {"usd_path": "assets/garment/shirt.usd", "scale": 0.45, "pos": [0.275, 0.0, 0.13]}
 VR_CAMS = {
     # The right wrist camera leads; both wrist cameras ride the grippers (docs/VR.md).
     "a_wrist_right": {"type": "tiled", "attach": "gripper_base", "robot": "robot", "prim_path": "{ENV_REGEX_NS}/WristCamRight",
@@ -319,7 +319,7 @@ def demo() -> None:
     load_config(tmp)
     gui.add_row(key="shirt")
     gui.rows[-1].type.set("physx_cloth"); gui.rows[-1]._on_type()   # what picking it in the dropdown does
-    shirt = {"type": "physx_cloth", "usd_path": "assets/garment/shirt.usd", "scale": 0.18, "pos": [0.30, -0.05, 0.02]}
+    shirt = {"type": "physx_cloth", "usd_path": "assets/garment/shirt.usd", "scale": 0.45, "pos": [0.275, 0.0, 0.13]}
     cfg = gui.to_config()
     assert cfg["scene"]["objects"]["shirt"] == shirt and cfg["sim"]["device"] == "cuda:0", "a PhysX deformable is GPU only"
     ship = SceneGui(root, REPO / "configs" / "vr_teleop.yaml").to_config()   # the shipped shirt scene round-trips

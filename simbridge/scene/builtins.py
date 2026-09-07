@@ -406,8 +406,9 @@ def _lehome(spec: dict[str, Any]) -> Any:
 def _physx_cloth(spec: dict[str, Any]) -> Any:
     """A garment as a PhysX surface deformable -- cloth on the same engine as the arms.
 
-    ``{type: physx_cloth, usd_path: assets/garment/shirt.usd, scale: 0.18}``. PhysX 5's surface
-    deformable (the OmniPhysics schema; Isaac Sim 5+ dropped the particle cloth LeHome used) --
+    ``{type: physx_cloth, usd_path: assets/garment/shirt.usd, scale: 0.45}``. PhysX's surface
+    deformable (the OmniPhysics schema; PhysX 110.1.2 in Isaac Sim 6.0 removed the particle
+    cloth LeHome used on 5.1) --
     so the arms, the contacts and the renderer stay on PhysX and a camera costs what it costs
     on a rigid scene, not the Newton render stall (docs/PHYSICS.md). GPU physics only:
     ``sim.device: cuda:0``. Material numbers are solver stiffnesses, not an identified fabric.
@@ -420,16 +421,18 @@ def _physx_cloth(spec: dict[str, Any]) -> Any:
         raise KeyError("a physx_cloth needs a usd_path (a single Mesh, e.g. assets/garment/shirt.usd)")
     raw = spec.get("scale", 1.0)
     scale = (float(raw),) * 3 if isinstance(raw, (int, float)) else tuple(float(v) for v in raw)
-    # The numbers Isaac Lab's own PhysX cloth-lifting task ships (isaaclab_tasks core/lift
-    # franka_soft/franka_cloth_env_cfg.py), except friction: their 10 kept the shirt hung
-    # over the pads after the jaw opened; 1.0 holds and lets go (docs/VR.md). Solver
+    # Isaac Lab's own PhysX cloth-lifting task ships bend 1e6, Young 1e6, density 1000,
+    # friction 10: dropped on a table that lands as a 78 mm shell -- paper. Measured by
+    # dropping the shirt (docs/VR.md): bend <= 100 drapes flat (45 mm, two layers plus the
+    # collar), Young 1e5 stretches like jersey, density 400 makes it a 140 g shirt, and
+    # friction 1.0 lets go on release where 10 kept it hung over the pads. Solver
     # stiffnesses, not an identified fabric.
     material = PhysxSurfaceDeformableBodyMaterialCfg(
-        density=float(spec.get("density", 1000.0)),
+        density=float(spec.get("density", 400.0)),
         surface_thickness=float(spec.get("thickness", 0.001)),
         poissons_ratio=float(spec.get("poissons_ratio", 0.25)),
-        youngs_modulus=float(spec.get("youngs_modulus", 1.0e6)),
-        surface_bend_stiffness=float(spec.get("bend_stiffness", 1.0e6)),
+        youngs_modulus=float(spec.get("youngs_modulus", 1.0e5)),
+        surface_bend_stiffness=float(spec.get("bend_stiffness", 10.0)),
         elasticity_damping=float(spec.get("elasticity_damping", 0.1)),
         bend_damping=float(spec.get("bend_damping", 0.1)),
         static_friction=float(spec.get("static_friction", 1.0)),

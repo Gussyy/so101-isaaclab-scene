@@ -199,7 +199,11 @@ def main() -> None:
                 print(f"[run] completed {step} steps")
                 break
             packet = to_packet(step, obs, env.num_envs)
-            if cams and step % 2 == 0:
+            # Every step: reading .data.output is what triggers a render, and only when the
+            # camera's update_period has elapsed in simulator time -- reading on even steps
+            # only, against a 0.05 s period and a 0.02 s step, rendered once per FOUR steps
+            # (docs/VR.md, "Smoother in the headset").
+            if cams:
                 for name in cams:
                     rgb = env.scene[name].data.output.get("rgb")
                     if rgb is not None:
